@@ -1,7 +1,7 @@
 {
-    "name": "my-first-addon",
+    "name": "auto-brand-kit-rebuilder",
     "version": "1.0.0",
-    "description": "Adobe Creative Cloud Web Add-on.",
+    "description": "Adobe Express Add-on that reverse-engineers complete brand kits from screenshots using multimodal AI.",
     "scripts": {
         "clean": "ccweb-add-on-scripts clean",
         "build": "ccweb-add-on-scripts build --use webpack",
@@ -12,11 +12,16 @@
         "Adobe",
         "Creative Cloud Web",
         "Add-on",
-        "panel"
+        "panel",
+        "brand-kit",
+        "AI",
+        "Gemini"
     ],
     "dependencies": {
+        "@google/generative-ai": "^0.21.0",
         "@swc-react/button": "1.7.0",
         "@swc-react/theme": "1.7.0",
+        "jspdf": "^2.5.1",
         "react": "18.2.0",
         "react-dom": "18.2.0"
     },
@@ -27,6 +32,8 @@
         "@types/react-dom": "18.2.7",
         "copy-webpack-plugin": "11.0.0",
         "css-loader": "6.8.1",
+        "dotenv": "^16.4.5",
+        "dotenv-webpack": "^8.1.1",
         "html-webpack-plugin": "5.5.3",
         "style-loader": "3.3.3",
         "ts-loader": "9.5.1",

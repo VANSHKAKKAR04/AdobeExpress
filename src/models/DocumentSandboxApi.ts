@@ -1,4 +1,14 @@
 // This interface declares all the APIs that the document sandbox runtime ( i.e. code.ts ) exposes to the UI/iframe runtime
+import { BrandKit } from "./BrandKit";
+
 export interface DocumentSandboxApi {
-    createRectangle(): void;
+    /**
+     * Apply brand kit to the current Adobe Express document
+     */
+    applyBrandKit(brandKit: BrandKit): Promise<void>;
+    
+    /**
+     * Create a brand kit preview by adding color swatches and typography samples
+     */
+    createBrandKitPreview(brandKit: BrandKit): Promise<void>;
 }

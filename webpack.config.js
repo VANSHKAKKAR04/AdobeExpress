@@ -1,11 +1,15 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const webpack = require("webpack");
+const Dotenv = require("dotenv-webpack");
 
 const isEnvProduction = process.env.NODE_ENV === "production";
 
 const uiPath = path.resolve(__dirname, "./src/ui");
 const sandboxPath = path.resolve(__dirname, "./src/sandbox");
+const servicesPath = path.resolve(__dirname, "./src/services");
+const modelsPath = path.resolve(__dirname, "./src/models");
 
 module.exports = {
     mode: isEnvProduction ? "production" : "development",
@@ -37,6 +41,13 @@ module.exports = {
         }),
         new CopyWebpackPlugin({
             patterns: [{ from: "src/*.json", to: "[name][ext]" }]
+        }),
+        new Dotenv({
+            path: path.resolve(__dirname, ".env"),
+            systemvars: false, // Don't override with system environment variables
+            safe: false, // Don't require .env.example
+            silent: false, // Show warnings if .env file is missing
+            defaults: false // Don't use .env.defaults
         })
     ],
     module: {
@@ -65,6 +76,19 @@ module.exports = {
                     }
                 ],
                 include: sandboxPath,
+                exclude: /node_modules/
+            },
+            {
+                test: /\.tsx?$/,
+                use: [
+                    {
+                        loader: "ts-loader",
+                        options: {
+                            configFile: path.resolve(uiPath, "tsconfig.json")
+                        }
+                    }
+                ],
+                include: [servicesPath, modelsPath],
                 exclude: /node_modules/
             },
             {
