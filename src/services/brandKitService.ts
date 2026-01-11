@@ -2,7 +2,7 @@
  * Brand Kit Service - transforms raw extraction results into usable brand kits
  */
 
-import { BrandKit, BrandColor, BrandTypography, GeminiExtractionResult } from "../models/BrandKit";
+import { BrandKit, BrandColor, BrandTypography, MistralExtractionResult } from "../models/BrandKit";
 
 /**
  * Convert hex color to RGB (0-1 range for Adobe Express)
@@ -28,9 +28,9 @@ function hexToRgb(hex: string): { red: number; green: number; blue: number } | n
 }
 
 /**
- * Transform Gemini extraction result into structured BrandKit
+ * Transform Mistral extraction result into structured BrandKit
  */
-export function transformToBrandKit(extraction: GeminiExtractionResult): BrandKit {
+export function transformToBrandKit(extraction: MistralExtractionResult): BrandKit {
     const colors: BrandKit['colors'] = {
         primary: (extraction.colors?.primary || []).map(hex => {
             const rgb = hexToRgb(hex);

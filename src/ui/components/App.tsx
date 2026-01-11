@@ -11,7 +11,7 @@ import React, { useState, useEffect } from "react";
 import { DocumentSandboxApi } from "../../models/DocumentSandboxApi";
 import { BrandKit } from "../../models/BrandKit";
 import { FileUpload } from "./FileUpload";
-import { extractBrandKitFromImage, checkGeminiAPI } from "../../services/geminiService";
+import { extractBrandKitFromImage, checkMistralAPI } from "../../services/mistralService";
 import { transformToBrandKit } from "../../services/brandKitService";
 import { generateBrandGuidelinesPDF } from "../../services/pdfService";
 import "./App.css";
@@ -29,7 +29,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
 
     // Check API status on mount
     useEffect(() => {
-        checkGeminiAPI().then((result) => {
+        checkMistralAPI().then((result) => {
             setApiStatus({
                 checked: true,
                 working: result.success,
@@ -58,7 +58,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         try {
             setState("analyzing");
             
-            // Extract brand kit using Gemini API
+            // Extract brand kit using Mistral API
             const extractionResult = await extractBrandKitFromImage(file);
             
             // Transform to structured brand kit

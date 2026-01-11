@@ -15,10 +15,9 @@
         "panel",
         "brand-kit",
         "AI",
-        "Gemini"
+        "Mistral"
     ],
     "dependencies": {
-        "@google/generative-ai": "^0.21.0",
         "@swc-react/button": "1.7.0",
         "@swc-react/theme": "1.7.0",
         "jspdf": "^2.5.1",

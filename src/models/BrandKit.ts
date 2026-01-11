@@ -46,7 +46,7 @@ export interface BrandKit {
     guidelines?: string; // Generated guidelines text
 }
 
-export interface GeminiExtractionResult {
+export interface MistralExtractionResult {
     colors: {
         primary: string[];
         secondary: string[];
