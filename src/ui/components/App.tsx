@@ -119,39 +119,129 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                 throw new Error("PDF generation failed - empty blob (0 bytes)");
             }
             
-            // Create download link
-            console.log("Creating download link...");
-            const url = URL.createObjectURL(pdfBlob);
-            console.log("Blob URL created:", url);
+            // Convert blob to data URL for more reliable opening in sandboxed iframes
+            console.log("Converting PDF blob to data URL...");
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
+                reader.readAsDataURL(pdfBlob);
+            });
             
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "brand-usage-guidelines.pdf";
-            a.style.display = "none";
+            console.log("Data URL created, length:", dataUrl.length);
             
-            // Append to body
-            console.log("Appending link to DOM...");
-            document.body.appendChild(a);
+            // Open PDF in new window - user can download from browser's PDF viewer
+            console.log("Opening PDF in new window...");
+            const newWindow = window.open(dataUrl, "_blank");
             
-            // Trigger download
-            console.log("Clicking download link...");
-            a.click();
-            console.log("Download link clicked!");
-            
-            // Clean up after a delay
-            setTimeout(() => {
-                if (document.body.contains(a)) {
-                    document.body.removeChild(a);
-                }
-                URL.revokeObjectURL(url);
-                console.log("Cleanup complete");
-            }, 500);
-            
-            setState(originalState); // Return to previous state
-            console.log("Download process complete");
-            
-            // Show success message briefly
-            alert("PDF download started! Check your downloads folder.");
+            if (newWindow) {
+                console.log("PDF opened successfully in new window - user can download from browser");
+                setState(originalState);
+            } else {
+                console.warn("Popup blocked - showing manual copy instructions");
+                // Since all automated methods are blocked, provide a manual copy solution
+                const linkContainer = document.createElement("div");
+                linkContainer.style.cssText = "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid #0066cc; border-radius: 8px; z-index: 10000; box-shadow: 0 8px 16px rgba(0,0,0,0.2); max-width: 500px; max-height: 80vh; overflow-y: auto;";
+                
+                // Title
+                const title = document.createElement("div");
+                title.textContent = "📄 PDF Ready!";
+                title.style.cssText = "margin-bottom: 12px; font-weight: bold; color: #333; font-size: 16px;";
+                linkContainer.appendChild(title);
+                
+                // Instructions
+                const instructions = document.createElement("div");
+                instructions.innerHTML = `
+                    <div style="font-size: 12px; color: #666; margin-bottom: 12px; line-height: 1.5;">
+                        <strong>Due to security restrictions, please follow these steps:</strong><br><br>
+                        1. Select all text in the box below (Ctrl+A or Cmd+A)<br>
+                        2. Copy it (Ctrl+C or Cmd+C)<br>
+                        3. Open a new browser tab<br>
+                        4. Paste the link in the address bar and press Enter<br>
+                        5. The PDF will open and you can download it
+                    </div>
+                `;
+                linkContainer.appendChild(instructions);
+                
+                // Selectable textarea with the data URL
+                const textArea = document.createElement("textarea");
+                textArea.value = dataUrl;
+                textArea.readOnly = true;
+                textArea.style.cssText = "width: 100%; height: 120px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 11px; resize: vertical; margin-bottom: 12px; box-sizing: border-box;";
+                textArea.addEventListener("focus", () => {
+                    textArea.select();
+                });
+                textArea.addEventListener("click", () => {
+                    textArea.select();
+                });
+                linkContainer.appendChild(textArea);
+                
+                // Select all button
+                const selectButton = document.createElement("button");
+                selectButton.textContent = "📋 Select All Text";
+                selectButton.style.cssText = "margin-bottom: 8px; padding: 8px 12px; cursor: pointer; background: #0066cc; color: white; border: none; border-radius: 4px; width: 100%; font-size: 12px; font-weight: bold;";
+                selectButton.addEventListener("click", () => {
+                    textArea.focus();
+                    textArea.select();
+                    try {
+                        // Try to copy (may fail due to permissions, but selection will work)
+                        document.execCommand("copy");
+                        selectButton.textContent = "✓ Selected! (Copy with Ctrl+C)";
+                        selectButton.style.background = "#4caf50";
+                        setTimeout(() => {
+                            selectButton.textContent = "📋 Select All Text";
+                            selectButton.style.background = "#0066cc";
+                        }, 2000);
+                    } catch (e) {
+                        selectButton.textContent = "✓ Selected! (Copy with Ctrl+C)";
+                        selectButton.style.background = "#4caf50";
+                        setTimeout(() => {
+                            selectButton.textContent = "📋 Select All Text";
+                            selectButton.style.background = "#0066cc";
+                        }, 2000);
+                    }
+                });
+                linkContainer.appendChild(selectButton);
+                
+                // Alternative: Right-clickable link
+                const altInstructions = document.createElement("div");
+                altInstructions.style.cssText = "font-size: 11px; color: #666; margin-bottom: 8px; text-align: center;";
+                altInstructions.innerHTML = "Or right-click this link: ";
+                const directLink = document.createElement("a");
+                directLink.href = dataUrl;
+                directLink.textContent = "Open PDF Link";
+                directLink.style.cssText = "color: #0066cc; text-decoration: underline; cursor: pointer; margin-left: 4px;";
+                altInstructions.appendChild(directLink);
+                linkContainer.appendChild(altInstructions);
+                
+                // Close button
+                const closeButton = document.createElement("button");
+                closeButton.textContent = "Close";
+                closeButton.style.cssText = "margin-top: 8px; padding: 8px 12px; cursor: pointer; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-size: 12px;";
+                closeButton.addEventListener("click", () => {
+                    if (document.body.contains(linkContainer)) {
+                        document.body.removeChild(linkContainer);
+                    }
+                });
+                linkContainer.appendChild(closeButton);
+                
+                document.body.appendChild(linkContainer);
+                
+                // Auto-select text on open
+                setTimeout(() => {
+                    textArea.focus();
+                    textArea.select();
+                }, 100);
+                
+                // Auto-remove after 5 minutes
+                setTimeout(() => {
+                    if (document.body.contains(linkContainer)) {
+                        document.body.removeChild(linkContainer);
+                    }
+                }, 300000);
+                
+                setState(originalState);
+            }
             
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
@@ -320,11 +410,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             <Button 
                                 size="m" 
                                 variant="secondary" 
-                                onClick={(e) => {
-                                    console.log("Download button clicked!", e);
-                                    e.preventDefault();
-                                    handleDownloadPDF();
-                                }}
+                                onClick={handleDownloadPDF}
                             >
                                 Download Guidelines PDF
                             </Button>

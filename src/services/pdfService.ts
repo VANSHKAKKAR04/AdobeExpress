@@ -2,7 +2,7 @@
  * PDF Generation Service for Brand Usage Guidelines
  */
 
-import jsPDF from "jspdf";
+import { jsPDF } from "jspdf";
 import { BrandKit } from "../models/BrandKit";
 import { generateGuidelines } from "./brandKitService";
 
