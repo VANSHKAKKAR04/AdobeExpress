@@ -26,6 +26,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     const [brandKit, setBrandKit] = useState<BrandKit | null>(null);
     const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
     const [apiStatus, setApiStatus] = useState<{ checked: boolean; working: boolean; message?: string }>({ checked: false, working: false });
+    const [showCommunicationStyle, setShowCommunicationStyle] = useState<boolean>(false);
 
     // Check API status on mount
     useEffect(() => {
@@ -399,6 +400,168 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                         {typo.role}: {typo.fontFamily} ({typo.fontWeight})
                                     </div>
                                 ))}
+                            </div>
+                        )}
+
+                        {/* Logo Variations & Styles Preview */}
+                        {(brandKit.logos.styles || brandKit.logos.full || brandKit.logos.icon) && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    Logo Variations & Styles:
+                                </p>
+                                {brandKit.logos.styles && (
+                                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                                        {brandKit.logos.styles.clearSpace && (
+                                            <div>Clear Space: {brandKit.logos.styles.clearSpace}</div>
+                                        )}
+                                        {brandKit.logos.styles.minSize && (
+                                            <div>Min Size: {brandKit.logos.styles.minSize}</div>
+                                        )}
+                                        {brandKit.logos.styles.usage && brandKit.logos.styles.usage.length > 0 && (
+                                            <div style={{ marginTop: "4px" }}>
+                                                <strong>Usage:</strong>
+                                                <ul style={{ margin: "4px 0", paddingLeft: "20px" }}>
+                                                    {brandKit.logos.styles.usage.map((usage, i) => (
+                                                        <li key={i} style={{ fontSize: "10px" }}>{usage}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {brandKit.logos.styles.donts && brandKit.logos.styles.donts.length > 0 && (
+                                            <div style={{ marginTop: "4px" }}>
+                                                <strong>Don'ts:</strong>
+                                                <ul style={{ margin: "4px 0", paddingLeft: "20px" }}>
+                                                    {brandKit.logos.styles.donts.map((dont, i) => (
+                                                        <li key={i} style={{ fontSize: "10px", color: "#d32f2f" }}>{dont}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Icons & Graphics Preview */}
+                        {brandKit.graphics && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    Icons & Graphics:
+                                </p>
+                                {brandKit.graphics.patterns && brandKit.graphics.patterns.length > 0 && (
+                                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                                        <strong>Patterns:</strong> {brandKit.graphics.patterns.join(", ")}
+                                    </div>
+                                )}
+                                {brandKit.graphics.illustrations && (
+                                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                                        <strong>Illustration Style:</strong> {brandKit.graphics.illustrations}
+                                    </div>
+                                )}
+                                {brandKit.graphics.icons && brandKit.graphics.icons.length > 0 && (
+                                    <div style={{ fontSize: "11px" }}>
+                                        <strong>Icons:</strong>
+                                        <ul style={{ margin: "4px 0", paddingLeft: "20px" }}>
+                                            {brandKit.graphics.icons.map((icon, i) => (
+                                                <li key={i} style={{ fontSize: "10px" }}>
+                                                    {icon.name}
+                                                    {icon.description && ` - ${icon.description}`}
+                                                    {icon.usage && ` (${icon.usage})`}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Contrast Rules Preview */}
+                        {brandKit.contrastRules && brandKit.contrastRules.length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    Contrast Rules:
+                                </p>
+                                {brandKit.contrastRules.map((rule, i) => (
+                                    <div key={i} style={{ fontSize: "11px", marginBottom: "6px", padding: "6px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                                            <div 
+                                                style={{ 
+                                                    width: "16px", 
+                                                    height: "16px", 
+                                                    backgroundColor: rule.colorPair.foreground,
+                                                    borderRadius: "2px",
+                                                    border: "1px solid #ddd"
+                                                }}
+                                            />
+                                            <span>on</span>
+                                            <div 
+                                                style={{ 
+                                                    width: "16px", 
+                                                    height: "16px", 
+                                                    backgroundColor: rule.colorPair.background,
+                                                    borderRadius: "2px",
+                                                    border: "1px solid #ddd"
+                                                }}
+                                            />
+                                        </div>
+                                        <div style={{ fontSize: "10px", color: "#666" }}>
+                                            Ratio: {rule.ratio}:1 | Level: {rule.level}
+                                            {rule.usage && ` | ${rule.usage}`}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Communication Style (Advanced/Collapsible) */}
+                        {brandKit.communicationStyle && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <button
+                                    onClick={() => setShowCommunicationStyle(!showCommunicationStyle)}
+                                    style={{
+                                        fontSize: "11px",
+                                        fontWeight: "bold",
+                                        color: "#666",
+                                        background: "none",
+                                        border: "none",
+                                        cursor: "pointer",
+                                        padding: "4px 0",
+                                        textAlign: "left",
+                                        width: "100%",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "4px"
+                                    }}
+                                >
+                                    <span>{showCommunicationStyle ? "▼" : "▶"}</span>
+                                    <span>Communication Style (Inferred)</span>
+                                    <span style={{ fontSize: "9px", fontWeight: "normal", color: "#999", marginLeft: "auto" }}>
+                                        AI content rules
+                                    </span>
+                                </button>
+                                {showCommunicationStyle && (
+                                    <div style={{ 
+                                        fontSize: "10px", 
+                                        marginTop: "8px", 
+                                        padding: "8px", 
+                                        backgroundColor: "#f9f9f9", 
+                                        borderRadius: "4px",
+                                        border: "1px solid #e0e0e0"
+                                    }}>
+                                        <p style={{ fontSize: "9px", color: "#666", marginBottom: "6px", fontStyle: "italic" }}>
+                                            These rules are inferred from brand materials and used for AI-generated content to maintain brand consistency.
+                                        </p>
+                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", fontSize: "10px" }}>
+                                            <div><strong>Formality:</strong> {brandKit.communicationStyle.formality}</div>
+                                            <div><strong>Language:</strong> {brandKit.communicationStyle.languageStyle}</div>
+                                            <div><strong>Audience:</strong> {brandKit.communicationStyle.audienceType}</div>
+                                            <div><strong>CTA Style:</strong> {brandKit.communicationStyle.ctaStyle}</div>
+                                            <div style={{ gridColumn: "1 / -1" }}>
+                                                <strong>Approach:</strong> {brandKit.communicationStyle.communicationApproach}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 

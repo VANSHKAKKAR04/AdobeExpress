@@ -2,7 +2,7 @@
  * Brand Kit Service - transforms raw extraction results into usable brand kits
  */
 
-import { BrandKit, BrandColor, BrandTypography, MistralExtractionResult } from "../models/BrandKit";
+import { BrandKit, BrandColor, BrandTypography, MistralExtractionResult, BrandIcon, CommunicationStyle } from "../models/BrandKit";
 
 /**
  * Convert hex color to RGB (0-1 range for Adobe Express)
@@ -111,16 +111,61 @@ export function transformToBrandKit(extraction: MistralExtractionResult): BrandK
         elementPadding: extraction.spacing?.element_padding || 16,
     };
 
+    const logos: BrandKit['logos'] = {
+        full: extraction.logos?.full || '',
+        icon: extraction.logos?.icon,
+        monochrome: extraction.logos?.monochrome,
+        inverted: extraction.logos?.inverted,
+        variations: extraction.logos?.variations ? {
+            horizontal: extraction.logos.variations.horizontal,
+            vertical: extraction.logos.variations.vertical,
+            stacked: extraction.logos.variations.stacked,
+        } : undefined,
+        styles: extraction.logos?.styles ? {
+            clearSpace: extraction.logos.styles.clear_space,
+            minSize: extraction.logos.styles.min_size,
+            usage: extraction.logos.styles.usage || [],
+            donts: extraction.logos.styles.donts || [],
+        } : undefined,
+    };
+
+    const graphics: BrandKit['graphics'] = extraction.graphics ? {
+        patterns: extraction.graphics.patterns || [],
+        illustrations: extraction.graphics.illustrations,
+        icons: extraction.graphics.icons?.map(icon => ({
+            name: icon.name,
+            description: icon.description,
+            usage: icon.usage,
+            category: (icon.category as BrandIcon['category']) || 'other',
+        })) || [],
+    } : undefined;
+
+    const contrastRules: BrandKit['contrastRules'] = extraction.contrast_rules?.map(rule => ({
+        colorPair: {
+            foreground: rule.foreground,
+            background: rule.background,
+        },
+        ratio: rule.ratio || 4.5,
+        level: (rule.level as 'AA' | 'AAA' | 'AA-Large' | 'AAA-Large') || 'AA',
+        usage: rule.usage,
+    })) || undefined;
+
+    const communicationStyle: BrandKit['communicationStyle'] = extraction.communication_style ? {
+        formality: extraction.communication_style.formality || 'neutral',
+        languageStyle: extraction.communication_style.language_style || 'informative',
+        audienceType: extraction.communication_style.audience_type || 'consumer',
+        ctaStyle: extraction.communication_style.cta_style || 'moderate',
+        communicationApproach: extraction.communication_style.communication_approach || 'friendly',
+    } : undefined;
+
     return {
         colors,
         typography,
-        logos: {
-            full: extraction.logos?.full || '',
-            icon: extraction.logos?.icon,
-            monochrome: extraction.logos?.monochrome,
-            inverted: extraction.logos?.inverted,
-        },
+        logos,
         spacing,
+        graphics,
+        contrastRules,
+        communicationStyle,
         tone: extraction.tone,
     };
 }
@@ -190,17 +235,91 @@ export function generateGuidelines(brandKit: BrandKit): string {
     guidelines += `\n`;
     guidelines += `Use multiples of the base unit for consistent spacing throughout designs.\n`;
     
-    if (brandKit.logos.full || brandKit.logos.icon) {
+    if (brandKit.logos.full || brandKit.logos.icon || brandKit.logos.styles) {
         guidelines += `\n## Logo Usage\n\n`;
-        guidelines += `- Always maintain minimum clear space around logos\n`;
-        guidelines += `- Use full logo when space allows\n`;
-        guidelines += `- Use icon mark in constrained spaces\n`;
+        if (brandKit.logos.styles) {
+            if (brandKit.logos.styles.clearSpace) {
+                guidelines += `- Minimum clear space: ${brandKit.logos.styles.clearSpace}\n`;
+            }
+            if (brandKit.logos.styles.minSize) {
+                guidelines += `- Minimum size: ${brandKit.logos.styles.minSize}\n`;
+            }
+            if (brandKit.logos.styles.usage && brandKit.logos.styles.usage.length > 0) {
+                guidelines += `\nUsage Guidelines:\n`;
+                brandKit.logos.styles.usage.forEach(usage => {
+                    guidelines += `- ${usage}\n`;
+                });
+            }
+            if (brandKit.logos.styles.donts && brandKit.logos.styles.donts.length > 0) {
+                guidelines += `\nWhat NOT to do:\n`;
+                brandKit.logos.styles.donts.forEach(dont => {
+                    guidelines += `- ${dont}\n`;
+                });
+            }
+        } else {
+            guidelines += `- Always maintain minimum clear space around logos\n`;
+            guidelines += `- Use full logo when space allows\n`;
+            guidelines += `- Use icon mark in constrained spaces\n`;
+        }
         if (brandKit.logos.monochrome) {
             guidelines += `- Use monochrome version on colored backgrounds\n`;
         }
         if (brandKit.logos.inverted) {
             guidelines += `- Use inverted version on dark backgrounds\n`;
         }
+    }
+    
+    if (brandKit.graphics) {
+        guidelines += `\n## Icons & Graphics\n\n`;
+        if (brandKit.graphics.patterns && brandKit.graphics.patterns.length > 0) {
+            guidelines += `### Patterns\n`;
+            brandKit.graphics.patterns.forEach(pattern => {
+                guidelines += `- ${pattern}\n`;
+            });
+            guidelines += `\n`;
+        }
+        if (brandKit.graphics.illustrations) {
+            guidelines += `### Illustration Style\n`;
+            guidelines += `${brandKit.graphics.illustrations}\n\n`;
+        }
+        if (brandKit.graphics.icons && brandKit.graphics.icons.length > 0) {
+            guidelines += `### Icons\n`;
+            brandKit.graphics.icons.forEach(icon => {
+                guidelines += `- **${icon.name}**`;
+                if (icon.description) {
+                    guidelines += `: ${icon.description}`;
+                }
+                if (icon.usage) {
+                    guidelines += ` - ${icon.usage}`;
+                }
+                guidelines += `\n`;
+            });
+            guidelines += `\n`;
+        }
+    }
+    
+    if (brandKit.contrastRules && brandKit.contrastRules.length > 0) {
+        guidelines += `\n## Contrast Rules\n\n`;
+        guidelines += `These color combinations meet WCAG accessibility standards:\n\n`;
+        brandKit.contrastRules.forEach(rule => {
+            guidelines += `- **${rule.colorPair.foreground}** on **${rule.colorPair.background}**\n`;
+            guidelines += `  - Contrast Ratio: ${rule.ratio}:1\n`;
+            guidelines += `  - WCAG Level: ${rule.level}\n`;
+            if (rule.usage) {
+                guidelines += `  - Usage: ${rule.usage}\n`;
+            }
+            guidelines += `\n`;
+        });
+    }
+    
+    if (brandKit.communicationStyle) {
+        guidelines += `\n## Communication Style (Inferred)\n\n`;
+        guidelines += `*These communication rules are inferred from the brand materials and used for AI-generated content to maintain brand consistency.*\n\n`;
+        guidelines += `- **Formality:** ${brandKit.communicationStyle.formality}\n`;
+        guidelines += `- **Language Style:** ${brandKit.communicationStyle.languageStyle}\n`;
+        guidelines += `- **Audience Type:** ${brandKit.communicationStyle.audienceType}\n`;
+        guidelines += `- **CTA Style:** ${brandKit.communicationStyle.ctaStyle}\n`;
+        guidelines += `- **Communication Approach:** ${brandKit.communicationStyle.communicationApproach}\n`;
     }
     
     return guidelines;

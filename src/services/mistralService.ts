@@ -281,6 +281,42 @@ Extract the following information and return ONLY a valid JSON object with no ad
     "paragraph_gap": number,
     "element_padding": number
   },
+  "logos": {
+    "styles": {
+      "clear_space": "minimum clear space requirement (e.g., '2x logo height' or '24px')",
+      "min_size": "minimum size requirement (e.g., '24px' or '0.5in')",
+      "usage": ["guideline 1", "guideline 2"],
+      "donts": ["what not to do 1", "what not to do 2"]
+    }
+  },
+  "graphics": {
+    "patterns": ["description of pattern 1", "description of pattern 2"],
+    "illustrations": "description of illustration style (e.g., 'Minimalist line art', 'Bold geometric shapes', 'Hand-drawn sketches')",
+    "icons": [
+      {
+        "name": "icon name or category",
+        "description": "description of icon style",
+        "usage": "when to use",
+        "category": "social|navigation|action|decorative|other"
+      }
+    ]
+  },
+  "contrast_rules": [
+    {
+      "foreground": "#hex_color",
+      "background": "#hex_color",
+      "ratio": number (WCAG contrast ratio, e.g., 4.5 for AA, 7 for AAA),
+      "level": "AA|AAA|AA-Large|AAA-Large",
+      "usage": "when to use this color combination"
+    }
+  ],
+  "communication_style": {
+    "formality": "formal|casual|neutral (infer from design style, language, and visual elements)",
+    "language_style": "promotional|informative|educational|conversational (infer from text tone and purpose)",
+    "audience_type": "enterprise|consumer|startup|creator|professional (infer from design sophistication and messaging)",
+    "cta_style": "aggressive|subtle|moderate (infer from call-to-action prominence and language)",
+    "communication_approach": "direct|friendly|authoritative|approachable (infer from overall brand personality)"
+  },
   "tone": "brief description of brand tone (e.g., 'Professional and modern', 'Playful and energetic')"
 }
 
@@ -288,8 +324,11 @@ Important guidelines:
 1. For colors: Identify the most prominent colors and categorize them by their visual role (primary = main brand colors, secondary = supporting colors, accent = highlights, neutral = grays/backgrounds)
 2. For typography: Infer font family from appearance (Sans-serif, Serif, etc.) and estimate weights. Identify which text is heading vs body vs caption based on size and visual hierarchy.
 3. For spacing: Analyze gaps between sections, paragraphs, and elements to determine the spacing system (often based on an 8px or 4px grid)
-4. If a logo is visible, note it but don't extract the actual image (we'll handle logo extraction separately)
-5. Return valid JSON only, no markdown formatting or explanations
+4. For logos: If a logo is visible, describe its style guidelines (clear space, minimum size, usage rules, what not to do). Note variations if visible (horizontal, vertical, stacked).
+5. For graphics: Identify any patterns, illustration styles, or icon styles used in the design. Describe their characteristics and usage.
+6. For contrast rules: Analyze text-on-background combinations and determine WCAG contrast ratios. Include common combinations like primary text on white, white text on primary color, etc.
+7. For communication_style: Infer these from visual design, text content, and overall brand presentation. Analyze: design sophistication (enterprise vs consumer), language used (formal vs casual), CTA prominence (aggressive vs subtle), and overall brand personality. These are inferred rules for AI content generation to maintain brand consistency.
+8. Return valid JSON only, no markdown formatting or explanations. Use empty arrays/objects if information is not visible.
 
 Now analyze the image and return the JSON:`;
 
