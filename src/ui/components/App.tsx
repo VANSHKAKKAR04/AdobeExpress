@@ -14,11 +14,13 @@ import { FileUpload } from "./FileUpload";
 import { extractBrandKitFromImage, checkMistralAPI } from "../../services/mistralService";
 import { transformToBrandKit } from "../../services/brandKitService";
 import { generateBrandGuidelinesPDF } from "../../services/pdfService";
+import { convertToAllPlatforms, PLATFORM_SPECS } from "../../services/platformConverterService";
+import { generatePlatformPDF, generatePlatformImage, downloadBlob } from "../../services/platformDownloadService";
 import "./App.css";
 
 import { AddOnSDKAPI } from "https://new.express.adobe.com/static/add-on-sdk/sdk.js";
 
-type ProcessingState = "idle" | "uploading" | "analyzing" | "ready" | "applying" | "error";
+type ProcessingState = "idle" | "uploading" | "analyzing" | "ready" | "applying" | "converting" | "error";
 
 const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxProxy: DocumentSandboxApi }) => {
     const [state, setState] = useState<ProcessingState>("idle");
@@ -27,6 +29,12 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
     const [apiStatus, setApiStatus] = useState<{ checked: boolean; working: boolean; message?: string }>({ checked: false, working: false });
     const [showCommunicationStyle, setShowCommunicationStyle] = useState<boolean>(false);
+    
+    // Multi-platform converter state
+    const [rawDesignFile, setRawDesignFile] = useState<File | null>(null);
+    const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['linkedin', 'instagram', 'youtube_thumbnail']);
+    const [platformResults, setPlatformResults] = useState<Array<Awaited<ReturnType<typeof convertToAllPlatforms>>[0]> | null>(null);
+    const [downloadLinks, setDownloadLinks] = useState<Record<string, { pdf?: string; png?: string }>>({});
 
     // Check API status on mount
     useEffect(() => {
@@ -255,10 +263,89 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     };
 
     const handleReset = () => {
+        // Clean up download URLs to prevent memory leaks
+        Object.values(downloadLinks).forEach(links => {
+            if (links.pdf) URL.revokeObjectURL(links.pdf);
+            if (links.png) URL.revokeObjectURL(links.png);
+        });
+        
         setState("idle");
         setError(null);
         setBrandKit(null);
         setUploadedFileName(null);
+        setRawDesignFile(null);
+        setPlatformResults(null);
+        setDownloadLinks({});
+    };
+
+    // Convert file to base64
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = reader.result as string;
+                const base64 = result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    };
+
+    // Handle raw design upload for multi-platform conversion
+    const handleRawDesignSelect = async (file: File) => {
+        if (!brandKit) {
+            setError("Please extract a brand kit first before converting designs.");
+            setState("error");
+            return;
+        }
+
+        setRawDesignFile(file);
+        setState("converting");
+        setError(null);
+        setDownloadLinks({});
+
+        try {
+            const imageBase64 = await fileToBase64(file);
+            const mimeType = file.type || "image/png";
+
+            console.log("Converting to platforms:", selectedPlatforms);
+            const results = await convertToAllPlatforms(
+                imageBase64,
+                mimeType,
+                brandKit,
+                selectedPlatforms
+            );
+
+            console.log("Platform conversion results:", results);
+            setPlatformResults(results);
+            
+            // Generate download links for all platforms
+            const links: Record<string, { pdf?: string; png?: string }> = {};
+            for (const result of results) {
+                try {
+                    const pdfBlob = await generatePlatformPDF(result);
+                    const pngBlob = await generatePlatformImage(result);
+                    
+                    const pdfUrl = URL.createObjectURL(pdfBlob);
+                    const pngUrl = URL.createObjectURL(pngBlob);
+                    
+                    links[result.platform] = {
+                        pdf: pdfUrl,
+                        png: pngUrl
+                    };
+                } catch (err) {
+                    console.error(`Error generating downloads for ${result.platform}:`, err);
+                }
+            }
+            setDownloadLinks(links);
+            setState("ready");
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Failed to convert design";
+            setError(errorMsg);
+            setState("error");
+            console.error("Error converting to platforms:", err);
+        }
     };
 
     return (
@@ -565,6 +652,276 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             </div>
                         )}
 
+                        {/* Multi-Platform Converter Section */}
+                        <div style={{ 
+                            marginTop: "24px", 
+                            padding: "16px", 
+                            backgroundColor: "#f5f5f5", 
+                            borderRadius: "8px",
+                            border: "1px solid #e0e0e0"
+                        }}>
+                            <p style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "12px" }}>
+                                🚀 Multi-Platform Converter
+                            </p>
+                            <p style={{ fontSize: "11px", color: "#666", marginBottom: "12px" }}>
+                                Upload a raw design to apply brand kit styling and create platform-optimized versions.
+                            </p>
+
+                            {/* Platform Selection */}
+                            <div style={{ marginBottom: "12px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    Select Platforms:
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {Object.keys(PLATFORM_SPECS).map(platformKey => (
+                                        <label key={platformKey} style={{ 
+                                            display: "flex", 
+                                            alignItems: "center", 
+                                            gap: "4px",
+                                            fontSize: "11px",
+                                            cursor: "pointer"
+                                        }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedPlatforms.includes(platformKey)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedPlatforms([...selectedPlatforms, platformKey]);
+                                                    } else {
+                                                        setSelectedPlatforms(selectedPlatforms.filter(p => p !== platformKey));
+                                                    }
+                                                }}
+                                                style={{ cursor: "pointer" }}
+                                            />
+                                            {PLATFORM_SPECS[platformKey].name}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Raw Design Upload */}
+                            {!rawDesignFile && (
+                                <FileUpload 
+                                    onFileSelect={handleRawDesignSelect}
+                                    disabled={false}
+                                />
+                            )}
+
+                            {/* Platform Results */}
+                            {platformResults && platformResults.length > 0 && (
+                                <div style={{ marginTop: "16px" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+                                        <p style={{ fontSize: "12px", fontWeight: "bold", margin: 0 }}>
+                                            ✅ Platform Versions Created:
+                                        </p>
+                                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                            {platformResults.map((result) => (
+                                                downloadLinks[result.platform]?.png && (
+                                                    <a
+                                                        key={`all-png-${result.platform}`}
+                                                        href={downloadLinks[result.platform].png}
+                                                        download={`${result.platform}-${result.aspectRatio.width}x${result.aspectRatio.height}.png`}
+                                                        style={{
+                                                            padding: "6px 12px",
+                                                            fontSize: "11px",
+                                                            backgroundColor: "#4caf50",
+                                                            color: "white",
+                                                            textDecoration: "none",
+                                                            borderRadius: "4px",
+                                                            cursor: "pointer",
+                                                            display: "inline-block"
+                                                        }}
+                                                    >
+                                                        📥 {result.platform} PNG
+                                                    </a>
+                                                )
+                                            ))}
+                                        </div>
+                                    </div>
+                                    {platformResults.map((result, index) => (
+                                        <div key={index} style={{ 
+                                            marginBottom: "12px", 
+                                            padding: "12px", 
+                                            backgroundColor: "white", 
+                                            borderRadius: "4px",
+                                            border: "1px solid #ddd"
+                                        }}>
+                                            <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "4px" }}>
+                                                {result.platform} ({result.aspectRatio.width}x{result.aspectRatio.height})
+                                            </p>
+                                            <div style={{ fontSize: "11px", color: "#666", marginBottom: "4px" }}>
+                                                <strong>Headline:</strong> {result.headline}
+                                            </div>
+                                            <div style={{ fontSize: "11px", color: "#666", marginBottom: "8px" }}>
+                                                <strong>Caption:</strong> {result.caption.substring(0, 100)}...
+                                            </div>
+                                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginBottom: "8px" }}>
+                                                {result.brandColors.map((color, i) => (
+                                                    <div 
+                                                        key={i}
+                                                        style={{ 
+                                                            width: "20px", 
+                                                            height: "20px", 
+                                                            backgroundColor: color,
+                                                            borderRadius: "3px",
+                                                            border: "1px solid #ddd"
+                                                        }}
+                                                        title={color}
+                                                    />
+                                                ))}
+                                            </div>
+                                            <div style={{ marginTop: "8px" }}>
+                                                {/* Download Links Section */}
+                                                <div style={{ marginBottom: "8px" }}>
+                                                    <p style={{ fontSize: "11px", fontWeight: "bold", marginBottom: "4px", color: "#666" }}>
+                                                        Download Links (Copy & Paste):
+                                                    </p>
+                                                    
+                                                    {downloadLinks[result.platform]?.pdf && (
+                                                        <div style={{ marginBottom: "6px" }}>
+                                                            <div style={{ display: "flex", gap: "4px", alignItems: "center", marginBottom: "2px" }}>
+                                                                <span style={{ fontSize: "10px", color: "#666", minWidth: "60px" }}>PDF:</span>
+                                                                <input
+                                                                    type="text"
+                                                                    value={downloadLinks[result.platform].pdf}
+                                                                    readOnly
+                                                                    style={{
+                                                                        flex: 1,
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        border: "1px solid #ddd",
+                                                                        borderRadius: "4px",
+                                                                        fontFamily: "monospace",
+                                                                        backgroundColor: "#f9f9f9"
+                                                                    }}
+                                                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        navigator.clipboard.writeText(downloadLinks[result.platform].pdf!);
+                                                                        alert("PDF link copied to clipboard!");
+                                                                    }}
+                                                                    style={{
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        backgroundColor: "#4caf50",
+                                                                        color: "white",
+                                                                        border: "none",
+                                                                        borderRadius: "4px",
+                                                                        cursor: "pointer"
+                                                                    }}
+                                                                >
+                                                                    📋 Copy
+                                                                </button>
+                                                                <a
+                                                                    href={downloadLinks[result.platform].pdf}
+                                                                    download={`${result.platform}-${result.aspectRatio.width}x${result.aspectRatio.height}.pdf`}
+                                                                    style={{
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        backgroundColor: "#0066cc",
+                                                                        color: "white",
+                                                                        textDecoration: "none",
+                                                                        borderRadius: "4px",
+                                                                        display: "inline-block"
+                                                                    }}
+                                                                >
+                                                                    📥 Download
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {downloadLinks[result.platform]?.png && (
+                                                        <div style={{ marginBottom: "6px" }}>
+                                                            <div style={{ display: "flex", gap: "4px", alignItems: "center", marginBottom: "2px" }}>
+                                                                <span style={{ fontSize: "10px", color: "#666", minWidth: "60px" }}>PNG:</span>
+                                                                <input
+                                                                    type="text"
+                                                                    value={downloadLinks[result.platform].png}
+                                                                    readOnly
+                                                                    style={{
+                                                                        flex: 1,
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        border: "1px solid #ddd",
+                                                                        borderRadius: "4px",
+                                                                        fontFamily: "monospace",
+                                                                        backgroundColor: "#f9f9f9"
+                                                                    }}
+                                                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        navigator.clipboard.writeText(downloadLinks[result.platform].png!);
+                                                                        alert("PNG link copied to clipboard!");
+                                                                    }}
+                                                                    style={{
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        backgroundColor: "#4caf50",
+                                                                        color: "white",
+                                                                        border: "none",
+                                                                        borderRadius: "4px",
+                                                                        cursor: "pointer"
+                                                                    }}
+                                                                >
+                                                                    📋 Copy
+                                                                </button>
+                                                                <a
+                                                                    href={downloadLinks[result.platform].png}
+                                                                    download={`${result.platform}-${result.aspectRatio.width}x${result.aspectRatio.height}.png`}
+                                                                    style={{
+                                                                        padding: "4px 8px",
+                                                                        fontSize: "10px",
+                                                                        backgroundColor: "#0066cc",
+                                                                        color: "white",
+                                                                        textDecoration: "none",
+                                                                        borderRadius: "4px",
+                                                                        display: "inline-block"
+                                                                    }}
+                                                                >
+                                                                    📥 Download
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                
+                                                {/* Create in Express Button */}
+                                                <Button 
+                                                    size="s" 
+                                                    variant="secondary"
+                                                    onClick={async () => {
+                                                        try {
+                                                            await sandboxProxy.createPlatformDesign(
+                                                                result.platform,
+                                                                result.aspectRatio,
+                                                                result.headline,
+                                                                result.caption,
+                                                                result.brandColors
+                                                            );
+                                                        } catch (err) {
+                                                            setError(err instanceof Error ? err.message : "Failed to create in Express");
+                                                            setState("error");
+                                                        }
+                                                    }}
+                                                >
+                                                    ✨ Create in Express
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {rawDesignFile && !platformResults && (
+                                <p style={{ fontSize: "11px", color: "#666", fontStyle: "italic" }}>
+                                    Uploaded: {rawDesignFile.name}
+                                </p>
+                            )}
+                        </div>
+
                         {/* Actions */}
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
                             <Button size="m" onClick={handleApplyBrandKit}>
@@ -589,6 +946,18 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         <p>Applying brand kit to document...</p>
                         <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
                             Creating color swatches and typography samples...
+                        </p>
+                    </div>
+                )}
+
+                {state === "converting" && (
+                    <div>
+                        <p>🔄 Converting design to platforms...</p>
+                        <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
+                            Applying brand kit styling and creating platform-optimized versions...
+                        </p>
+                        <p style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
+                            This may take 30-60 seconds...
                         </p>
                     </div>
                 )}

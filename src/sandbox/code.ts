@@ -183,10 +183,72 @@ async function applyBrandKit(brandKit: BrandKit): Promise<void> {
     await createBrandKitPreview(brandKit);
 }
 
+/**
+ * Create a platform-optimized design in the document
+ */
+async function createPlatformDesign(
+    platform: string,
+    aspectRatio: { width: number; height: number },
+    headline: string,
+    caption: string,
+    brandColors: string[]
+): Promise<void> {
+    const insertionParent = editor.context.insertionParent;
+    
+    // Set document size (if possible)
+    // Note: Adobe Express SDK may not support direct canvas resizing
+    // This creates the design elements instead
+    
+    const margin = 50;
+    let yPos = margin;
+    
+    // Background rectangle with brand color
+    if (brandColors.length > 0) {
+        const bg = editor.createRectangle();
+        bg.width = aspectRatio.width;
+        bg.height = aspectRatio.height;
+        bg.translation = { x: 0, y: 0 };
+        bg.fill = editor.makeColorFill(hexToColor(brandColors[0]));
+        insertionParent.children.append(bg);
+    }
+    
+    // Headline
+    const headlineText = editor.createText(headline);
+    headlineText.fullContent.text = headline;
+    headlineText.fullContent.applyCharacterStyles({
+        fontSize: 32,
+        color: { red: 1, green: 1, blue: 1, alpha: 1 }, // White text
+    }, { start: 0, length: headline.length });
+    headlineText.translation = { x: margin, y: yPos };
+    insertionParent.children.append(headlineText);
+    yPos += 60;
+    
+    // Caption
+    const captionText = editor.createText(caption);
+    captionText.fullContent.text = caption;
+    captionText.fullContent.applyCharacterStyles({
+        fontSize: 16,
+        color: { red: 0.95, green: 0.95, blue: 0.95, alpha: 1 },
+    }, { start: 0, length: caption.length });
+    captionText.translation = { x: margin, y: yPos };
+    insertionParent.children.append(captionText);
+    
+    // Platform label
+    const platformLabel = editor.createText(`${platform} - ${aspectRatio.width}x${aspectRatio.height}`);
+    platformLabel.fullContent.text = `${platform} - ${aspectRatio.width}x${aspectRatio.height}`;
+    platformLabel.fullContent.applyCharacterStyles({
+        fontSize: 12,
+        color: { red: 0.8, green: 0.8, blue: 0.8, alpha: 1 },
+    }, { start: 0, length: platformLabel.fullContent.text.length });
+    platformLabel.translation = { x: margin, y: aspectRatio.height - 40 };
+    insertionParent.children.append(platformLabel);
+}
+
 function start() {
     runtime.exposeApi({
         applyBrandKit,
         createBrandKitPreview,
+        createPlatformDesign,
     });
 }
 

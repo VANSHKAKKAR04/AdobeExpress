@@ -11,4 +11,15 @@ export interface DocumentSandboxApi {
      * Create a brand kit preview by adding color swatches and typography samples
      */
     createBrandKitPreview(brandKit: BrandKit): Promise<void>;
+    
+    /**
+     * Create a platform-optimized design in the document
+     */
+    createPlatformDesign(
+        platform: string,
+        aspectRatio: { width: number; height: number },
+        headline: string,
+        caption: string,
+        brandColors: string[]
+    ): Promise<void>;
 }

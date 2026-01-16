@@ -23,8 +23,9 @@ if (!MISTRAL_API_KEY) {
 
 /**
  * Make a request to Mistral API
+ * Exported for use by other services
  */
-async function queryMistral(
+export async function queryMistral(
     prompt: string,
     imageBase64?: string,
     mimeType?: string,
