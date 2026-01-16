@@ -858,60 +858,61 @@ export async function generateComprehensiveBrandKit(
 
     const allAssets: GeneratedAsset[] = [];
 
+    // IMAGE GENERATION DISABLED - Commented out to remove Janus image generation
     // Generate logo assets if requested
-    if (generateLogos) {
-        try {
-            onProgress?.("Starting logo generation with Janus...");
-            const logos = await generateLogoAssets(brandKit, undefined, referenceImageBase64, onProgress);
-            allAssets.push(...logos);
-            onProgress?.(`✅ Generated ${logos.length} logo assets`);
-        } catch (error) {
-            console.error("Error generating logos:", error);
-            onProgress?.("⚠️ Logo generation encountered an error, continuing...");
-        }
-    }
+    // if (generateLogos) {
+    //     try {
+    //         onProgress?.("Starting logo generation with Janus...");
+    //         const logos = await generateLogoAssets(brandKit, undefined, referenceImageBase64, onProgress);
+    //         allAssets.push(...logos);
+    //         onProgress?.(`✅ Generated ${logos.length} logo assets`);
+    //     } catch (error) {
+    //         console.error("Error generating logos:", error);
+    //         onProgress?.("⚠️ Logo generation encountered an error, continuing...");
+    //     }
+    // }
 
     // Generate character assets if requested
-    if (generateCharacters && brandKit.characters && brandKit.characters.length > 0) {
-        try {
-            onProgress?.("Starting character generation with Janus...");
-            const characters = await generateCharacterAssets(brandKit, referenceImageBase64, onProgress);
-            allAssets.push(...characters);
-            onProgress?.(`✅ Generated ${characters.length} character assets`);
-        } catch (error) {
-            console.error("Error generating characters:", error);
-            onProgress?.("⚠️ Character generation encountered an error, continuing...");
-        }
-    }
+    // if (generateCharacters && brandKit.characters && brandKit.characters.length > 0) {
+    //     try {
+    //         onProgress?.("Starting character generation with Janus...");
+    //         const characters = await generateCharacterAssets(brandKit, referenceImageBase64, onProgress);
+    //         allAssets.push(...characters);
+    //         onProgress?.(`✅ Generated ${characters.length} character assets`);
+    //     } catch (error) {
+    //         console.error("Error generating characters:", error);
+    //         onProgress?.("⚠️ Character generation encountered an error, continuing...");
+    //     }
+    // }
 
     // Generate pattern assets if requested
-    if (generatePatterns) {
-        try {
-            onProgress?.("Starting pattern generation with Janus...");
-            const patterns = await generatePatternAssets(brandKit, referenceImageBase64, onProgress);
-            allAssets.push(...patterns);
-            onProgress?.(`✅ Generated ${patterns.length} pattern assets`);
-        } catch (error) {
-            console.error("Error generating patterns:", error);
-            onProgress?.("⚠️ Pattern generation encountered an error, continuing...");
-        }
-    }
+    // if (generatePatterns) {
+    //     try {
+    //         onProgress?.("Starting pattern generation with Janus...");
+    //         const patterns = await generatePatternAssets(brandKit, referenceImageBase64, onProgress);
+    //         allAssets.push(...patterns);
+    //         onProgress?.(`✅ Generated ${patterns.length} pattern assets`);
+    //     } catch (error) {
+    //         console.error("Error generating patterns:", error);
+    //         onProgress?.("⚠️ Pattern generation encountered an error, continuing...");
+    //     }
+    // }
 
     // Generate imagery assets if requested
-    if (generateImagery && brandKit.imagery) {
-        try {
-            onProgress?.("Starting imagery generation with Janus...");
-            const imagery = await generateImageryAssets(brandKit, referenceImageBase64, onProgress);
-            allAssets.push(...imagery);
-            onProgress?.(`✅ Generated ${imagery.length} imagery assets`);
-        } catch (error) {
-            console.error("Error generating imagery:", error);
-            onProgress?.("⚠️ Imagery generation encountered an error, continuing...");
-        }
-    }
+    // if (generateImagery && brandKit.imagery) {
+    //     try {
+    //         onProgress?.("Starting imagery generation with Janus...");
+    //         const imagery = await generateImageryAssets(brandKit, referenceImageBase64, onProgress);
+    //         allAssets.push(...imagery);
+    //         onProgress?.(`✅ Generated ${imagery.length} imagery assets`);
+    //     } catch (error) {
+    //         console.error("Error generating imagery:", error);
+    //         onProgress?.("⚠️ Imagery generation encountered an error, continuing...");
+    //     }
+    // }
 
     enhanced.generatedAssets = allAssets;
-    console.log(`✅ Total generated assets: ${allAssets.length}`);
+    // console.log(`✅ Total generated assets: ${allAssets.length}`);
 
     // Extract graphics from uploaded image if available
     // Try GPT-4 Vision first for better accuracy, fallback to Mistral positions

@@ -132,21 +132,21 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
             const transformedBrandKit = transformToBrandKit(extractionResult);
 
             console.log("✅ Brand kit transformed:", transformedBrandKit);
-
-            // Generate comprehensive brand kit with Janus (logos, characters, patterns, imagery)
-            console.log("🎨 Generating comprehensive brand kit with Janus...");
+            
+            // Generate comprehensive brand kit (image generation disabled)
+            console.log("🎨 Generating comprehensive brand kit...");
             setState("analyzing"); // Keep in analyzing state to show progress
 
             const comprehensiveBrandKit = await generateComprehensiveBrandKit(transformedBrandKit, {
-                generateLogos: true,
-                generateCharacters: true,
-                generatePatterns: true,
-                generateImagery: true,
+                generateLogos: false, // Image generation disabled
+                generateCharacters: false, // Image generation disabled
+                generatePatterns: false, // Image generation disabled
+                generateImagery: false, // Image generation disabled
                 extractGraphics: true,
                 referenceImageBase64: imageBase64,
                 extractionResult: extractionResult, // Pass extraction result for visible_logos
                 onProgress: (progress) => {
-                    console.log("Janus Progress:", progress);
+                    // Janus progress logging removed
                     setJanusProgress(progress);
                 },
             });
@@ -559,7 +559,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                 fontSize: "11px",
                                 color: "#1976d2"
                             }}>
-                                <strong>Janus Generation:</strong> {janusProgress}
+                                <strong>Progress:</strong> {janusProgress}
                             </div>
                         )}
                     </div>
