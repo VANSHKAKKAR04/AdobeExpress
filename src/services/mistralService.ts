@@ -471,31 +471,32 @@ Troubleshooting steps:
 
         const brandKit = JSON.parse(jsonText) as MistralExtractionResult;
         
-        // Always try to extract logo images using V2 pipeline
-        try {
-            // Use V2 pipeline: Detect → Crop → Refine → Filter
-            const extractedLogos = await extractLogosFromImageV2(file);
-            
-            if (extractedLogos && extractedLogos.length > 0) {
-                // Store the extracted logo images
-                brandKit.logos = brandKit.logos || {};
-                // Store first logo as 'full' for backward compatibility
-                brandKit.logos.full = extractedLogos[0].imageBase64;
-                // Store all logos in a new 'allLogos' array with V2 format
-                (brandKit.logos as any).allLogos = extractedLogos.map(logo => ({
-                    image: logo.imageBase64,
-                    description: logo.name,
-                    name: logo.name,
-                    confidence: logo.confidence
-                }));
-                console.log(`✅ Stored ${extractedLogos.length} confirmed logo(s) in brand kit`);
-            } else {
-                console.log("ℹ️ No logos confirmed by V2 pipeline");
-            }
-        } catch (logoError) {
-            console.warn("Logo extraction failed, continuing without logo images:", logoError);
-            // Continue without logo images - this is optional
-        }
+        // Logo extraction commented out - not needed for now
+        // // Always try to extract logo images using V2 pipeline
+        // try {
+        //     // Use V2 pipeline: Detect → Crop → Refine → Filter
+        //     const extractedLogos = await extractLogosFromImageV2(file);
+        //     
+        //     if (extractedLogos && extractedLogos.length > 0) {
+        //         // Store the extracted logo images
+        //         brandKit.logos = brandKit.logos || {};
+        //         // Store first logo as 'full' for backward compatibility
+        //         brandKit.logos.full = extractedLogos[0].imageBase64;
+        //         // Store all logos in a new 'allLogos' array with V2 format
+        //         (brandKit.logos as any).allLogos = extractedLogos.map(logo => ({
+        //             image: logo.imageBase64,
+        //             description: logo.name,
+        //             name: logo.name,
+        //             confidence: logo.confidence
+        //         }));
+        //         console.log(`✅ Stored ${extractedLogos.length} confirmed logo(s) in brand kit`);
+        //     } else {
+        //         console.log("ℹ️ No logos confirmed by V2 pipeline");
+        //     }
+        // } catch (logoError) {
+        //     console.warn("Logo extraction failed, continuing without logo images:", logoError);
+        //     // Continue without logo images - this is optional
+        // }
         
         return brandKit;
 

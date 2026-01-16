@@ -5,6 +5,7 @@
 import { BrandKit, BrandColor, BrandTypography, MistralExtractionResult, BrandIcon, CommunicationStyle, ColorPattern, ColorTheme, GeneratedAsset, TypographySystem, BrandCharacter, BrandImagery, ExtractedGraphic } from "../models/BrandKit";
 import { generateLogoWithJanus, generateLogoVariations, generatePatternWithJanus } from "./huggingFaceService";
 import { extractGraphicsFromImage } from "./graphicExtractionService";
+import { generateBrandKitTemplate } from "./mistralImageGenerationService";
 
 /**
  * Convert hex color to RGB (0-1 range for Adobe Express)
@@ -833,6 +834,8 @@ export async function generateComprehensiveBrandKit(
         generatePatterns?: boolean;
         generateImagery?: boolean;
         extractGraphics?: boolean;
+        generateTemplates?: boolean; // Template generation disabled by default due to CORS
+        templatePrompt?: string; // Custom user instructions for template generation
         referenceImageBase64?: string;
         extractionResult?: MistralExtractionResult;
         onProgress?: (progress: string) => void;
@@ -843,7 +846,9 @@ export async function generateComprehensiveBrandKit(
         generateCharacters = true,
         generatePatterns = true,
         generateImagery = true,
-        extractGraphics = true,
+        extractGraphics = false, // Disabled - graphics extraction not needed for now
+        generateTemplates = true, // Enabled - uses backend proxy to avoid CORS
+        templatePrompt,
         referenceImageBase64,
         extractionResult,
         onProgress,
@@ -914,62 +919,121 @@ export async function generateComprehensiveBrandKit(
     enhanced.generatedAssets = allAssets;
     // console.log(`✅ Total generated assets: ${allAssets.length}`);
 
-    // Extract graphics from uploaded image if available
-    // Try GPT-4 Vision first for better accuracy, fallback to Mistral positions
-    if (extractGraphics && referenceImageBase64) {
+    // Graphics extraction commented out - not needed for now
+    // if (extractGraphics && referenceImageBase64) {
+    //     try {
+    //         onProgress?.("Extracting graphics and logos from uploaded image...");
+    //         
+    //         let graphicsToExtract: Array<{
+    //             name: string;
+    //             type: string;
+    //             description?: string;
+    //             position: { x: number; y: number; width: number; height: number; };
+    //             usage?: string;
+    //         }> = [];
+    //         
+    //         // Try Gemini Vision first (free tier), then fallback to Mistral positions
+    //         try {
+    //             const { extractGraphicsWithGemini } = await import("./geminiVisionService");
+    //             onProgress?.("Using Gemini Vision for precise graphics detection (free tier)...");
+    //             const geminiGraphics = await extractGraphicsWithGemini(referenceImageBase64, "image/png");
+    //             if (geminiGraphics && geminiGraphics.length > 0) {
+    //                 graphicsToExtract = geminiGraphics;
+    //                 onProgress?.(`✅ Gemini Vision detected ${geminiGraphics.length} graphics`);
+    //             }
+    //         } catch (geminiError) {
+    //             console.log("Gemini Vision not available, using Mistral positions:", geminiError);
+    //             // Fallback to Mistral positions
+    //             const visibleLogos = extractionResult?.graphics?.visible_logos || 
+    //                                 (brandKit as any).graphics?.visible_logos;
+    //             if (visibleLogos && visibleLogos.length > 0) {
+    //                 graphicsToExtract = visibleLogos;
+    //                 onProgress?.("Using Mistral-detected graphics positions...");
+    //             }
+    //         }
+    //         
+    //         // Extract graphics using detected positions
+    //         if (graphicsToExtract.length > 0) {
+    //             const extractedGraphics = await extractGraphicsFromImage(
+    //                 referenceImageBase64,
+    //                 graphicsToExtract,
+    //                 onProgress
+    //             );
+    //             
+    //             if (extractedGraphics.length > 0) {
+    //                 if (!enhanced.graphics) {
+    //                     enhanced.graphics = {};
+    //                 }
+    //                 enhanced.graphics.extractedGraphics = extractedGraphics;
+    //                 onProgress?.(`✅ Extracted ${extractedGraphics.length} graphics from image`);
+    //             }
+    //         } else {
+    //             onProgress?.("⚠️ No graphics detected in image");
+    //         }
+    //     } catch (error) {
+    //         console.error("Error extracting graphics:", error);
+    //         onProgress?.("⚠️ Graphic extraction encountered an error, continuing...");
+    //     }
+    // }
+
+    // Generate brand kit template using Mistral image generation
+    // Note: This feature requires a backend proxy due to CORS limitations with Mistral Agents API
+    // It will gracefully fail in browser-only environments
+    // Disabled by default - set generateTemplates: true in options to enable (requires backend)
+    if (generateTemplates) {
         try {
-            onProgress?.("Extracting graphics and logos from uploaded image...");
+            onProgress?.("Generating brand kit template with Mistral...");
+            const template = await generateBrandKitTemplate(
+                enhanced,
+                referenceImageBase64,
+                templatePrompt, // Pass custom user prompt
+                onProgress
+            );
             
-            let graphicsToExtract: Array<{
-                name: string;
-                type: string;
-                description?: string;
-                position: { x: number; y: number; width: number; height: number; };
-                usage?: string;
-            }> = [];
-            
-            // Try GPT-4 Vision first for more accurate positions
-            try {
-                const { extractGraphicsWithGPT4Vision } = await import("./gpt4VisionService");
-                onProgress?.("Using GPT-4 Vision for precise graphics detection...");
-                const gpt4Graphics = await extractGraphicsWithGPT4Vision(referenceImageBase64, "image/png");
-                if (gpt4Graphics && gpt4Graphics.length > 0) {
-                    graphicsToExtract = gpt4Graphics;
-                    onProgress?.(`✅ GPT-4 Vision detected ${gpt4Graphics.length} graphics`);
+            if (template) {
+                if (!enhanced.layoutTemplates) {
+                    enhanced.layoutTemplates = [];
                 }
-            } catch (gpt4Error) {
-                console.log("GPT-4 Vision not available, using Mistral positions:", gpt4Error);
-                // Fallback to Mistral positions
-                const visibleLogos = extractionResult?.graphics?.visible_logos || 
-                                    (brandKit as any).graphics?.visible_logos;
-                if (visibleLogos && visibleLogos.length > 0) {
-                    graphicsToExtract = visibleLogos;
-                    onProgress?.("Using Mistral-detected graphics positions...");
-                }
-            }
-            
-            // Extract graphics using detected positions
-            if (graphicsToExtract.length > 0) {
-                const extractedGraphics = await extractGraphicsFromImage(
-                    referenceImageBase64,
-                    graphicsToExtract,
-                    onProgress
-                );
                 
-                if (extractedGraphics.length > 0) {
-                    if (!enhanced.graphics) {
-                        enhanced.graphics = {};
-                    }
-                    enhanced.graphics.extractedGraphics = extractedGraphics;
-                    onProgress?.(`✅ Extracted ${extractedGraphics.length} graphics from image`);
-                }
-            } else {
-                onProgress?.("⚠️ No graphics detected in image");
+                // Convert GeneratedTemplate to LayoutTemplate format
+                enhanced.layoutTemplates.push({
+                    name: template.name,
+                    type: template.type,
+                    structure: {
+                        sections: [
+                            {
+                                name: "Header",
+                                position: { x: 0, y: 0, width: 100, height: 20 },
+                                content: "text",
+                                recommendedColors: brandKit.colors?.primary?.map((c: any) => c.hex) || []
+                            },
+                            {
+                                name: "Main Content",
+                                position: { x: 0, y: 20, width: 100, height: 60 },
+                                content: "text",
+                                recommendedColors: brandKit.colors?.primary?.map((c: any) => c.hex) || []
+                            },
+                            {
+                                name: "Footer",
+                                position: { x: 0, y: 80, width: 100, height: 20 },
+                                content: "footer",
+                                recommendedColors: brandKit.colors?.neutral?.map((c: any) => c.hex) || []
+                            }
+                        ]
+                    },
+                    usage: template.usage,
+                    example: template.imageBase64 // Store the generated template image
+                });
+                
+                onProgress?.(`✅ Generated brand kit template: ${template.name}`);
             }
         } catch (error) {
-            console.error("Error extracting graphics:", error);
-            onProgress?.("⚠️ Graphic extraction encountered an error, continuing...");
+            console.error("Error generating template:", error);
+            onProgress?.("⚠️ Template generation encountered an error, continuing...");
         }
+    } else {
+        // Template generation is disabled by default
+        // onProgress?.("ℹ️ Template generation skipped (disabled by default - requires backend proxy)");
     }
 
     return enhanced;

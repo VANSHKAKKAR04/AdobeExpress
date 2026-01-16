@@ -1215,6 +1215,117 @@ export async function generateBrandGuidelinesPDF(brandKit: BrandKit, fileName: s
         });
     }
     
+    // ========== BRAND TEMPLATES SECTION ==========
+    // Always start on a new page for templates section
+    if (brandKit.layoutTemplates && brandKit.layoutTemplates.length > 0) {
+        doc.addPage();
+        yPos = margin;
+        
+        // Section Title
+        doc.setFontSize(20);
+        doc.setFont("helvetica", "bold");
+        doc.text("BRAND TEMPLATES", margin, yPos);
+        yPos += 12;
+        
+        // Section Introduction
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        const introText = "Generated brand templates showcase how to use the brand kit elements together in professional designs. Use these as starting points for marketing materials, presentations, and digital content.";
+        const introLines = doc.splitTextToSize(introText, maxWidth);
+        introLines.forEach((line: string) => {
+            doc.text(line, margin, yPos);
+            yPos += 6;
+        });
+        yPos += 10;
+        
+        // Display each template
+        brandKit.layoutTemplates.forEach((template, index) => {
+            // Add separator between templates if not first
+            if (index > 0) {
+                if (yPos > pageHeight - 120) {
+                    doc.addPage();
+                    yPos = margin;
+                } else {
+                    yPos += 8;
+                    doc.setDrawColor(200, 200, 200);
+                    doc.line(margin, yPos, pageWidth - margin, yPos);
+                    yPos += 12;
+                }
+            }
+            
+            // Template name
+            if (yPos > pageHeight - 120) {
+                doc.addPage();
+                yPos = margin;
+            }
+            
+            doc.setFontSize(16);
+            doc.setFont("helvetica", "bold");
+            doc.text(`Template ${index + 1}: ${template.name}`, margin, yPos);
+            yPos += 10;
+            
+            // Template usage/description
+            if (template.usage) {
+                doc.setFontSize(10);
+                doc.setFont("helvetica", "normal");
+                const usageLines = doc.splitTextToSize(template.usage, maxWidth);
+                usageLines.forEach((line: string) => {
+                    if (yPos > pageHeight - 120) {
+                        doc.addPage();
+                        yPos = margin;
+                    }
+                    doc.text(line, margin, yPos);
+                    yPos += 6;
+                });
+                yPos += 6;
+            }
+            
+            // Add template image if available
+            if (template.example) {
+                try {
+                    const imgData = `data:image/png;base64,${template.example}`;
+                    
+                    // Calculate image dimensions to fit page while maintaining aspect ratio
+                    const maxImgWidth = pageWidth - 2 * margin;
+                    const maxImgHeight = pageHeight - yPos - 40; // Leave space for footer
+                    
+                    // Use a larger size for template preview to show more detail
+                    let templateImgWidth = maxImgWidth;
+                    let templateImgHeight = Math.min(180, maxImgHeight); // Increased from 150 to 180 for better visibility
+                    
+                    // Check if we need a new page for the image
+                    if (yPos + templateImgHeight > pageHeight - 30) {
+                        doc.addPage();
+                        yPos = margin;
+                        templateImgHeight = Math.min(180, pageHeight - yPos - 40);
+                    }
+                    
+                    try {
+                        doc.addImage(imgData, "PNG", margin, yPos, templateImgWidth, templateImgHeight);
+                        yPos += templateImgHeight + 10;
+                    } catch (error) {
+                        console.error("Error adding template image to PDF:", error);
+                        doc.setFontSize(9);
+                        doc.setFont("helvetica", "italic");
+                        doc.text("(Template image could not be embedded)", margin, yPos);
+                        yPos += 8;
+                    }
+                } catch (error) {
+                    console.error("Error processing template image:", error);
+                    doc.setFontSize(9);
+                    doc.setFont("helvetica", "italic");
+                    doc.text("(Template image could not be processed)", margin, yPos);
+                    yPos += 8;
+                }
+            }
+            
+            yPos += 8;
+        });
+        
+        // Add spacing after templates section
+        yPos += 10;
+    }
+    
     // ========== THANK YOU PAGE ==========
     if (yPos > pageHeight - 50) {
         doc.addPage();

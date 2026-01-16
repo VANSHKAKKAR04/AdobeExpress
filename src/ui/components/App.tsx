@@ -14,6 +14,7 @@ import { FileUpload } from "./FileUpload";
 import { extractBrandKitFromImage, checkMistralAPI } from "../../services/mistralService";
 import { transformToBrandKit, generateComprehensiveBrandKit } from "../../services/brandKitService";
 import { generateBrandGuidelinesPDF } from "../../services/pdfService";
+import { generateBrandKitTemplate } from "../../services/mistralImageGenerationService";
 import { convertToAllPlatforms, PLATFORM_SPECS } from "../../services/platformConverterService";
 import { generatePlatformPDF, generatePlatformImage, downloadBlob } from "../../services/platformDownloadService";
 import { getSavedBrandKits, saveBrandKit, deleteSavedBrandKit, SavedBrandKit } from "../../services/brandKitStorageService";
@@ -74,6 +75,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     });
     const [janusProgress, setJanusProgress] = useState<string>("");
     const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
+    const [templatePrompt, setTemplatePrompt] = useState<string>("");
+    const [isGeneratingTemplate, setIsGeneratingTemplate] = useState<boolean>(false);
     
     // Multi-platform converter state
     const [rawDesignFile, setRawDesignFile] = useState<File | null>(null);
@@ -109,6 +112,15 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         setSavedBrandKits(getSavedBrandKits());
     }, []);
 
+    // Cleanup blob URLs when component unmounts or link changes
+    useEffect(() => {
+        return () => {
+            if (pdfDownloadLink && pdfDownloadLink.startsWith('blob:')) {
+                URL.revokeObjectURL(pdfDownloadLink);
+            }
+        };
+    }, [pdfDownloadLink]);
+
     const handleFileSelect = async (file: File) => {
         setState("uploading");
         setError(null);
@@ -142,11 +154,11 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                 generateCharacters: false, // Image generation disabled
                 generatePatterns: false, // Image generation disabled
                 generateImagery: false, // Image generation disabled
-                extractGraphics: true,
+                extractGraphics: false, // Commented out - graphics extraction not needed for now
+                generateTemplates: false, // Templates will be generated separately after brand kit is ready
                 referenceImageBase64: imageBase64,
-                extractionResult: extractionResult, // Pass extraction result for visible_logos
+                extractionResult: extractionResult,
                 onProgress: (progress) => {
-                    // Janus progress logging removed
                     setJanusProgress(progress);
                 },
             });
@@ -194,21 +206,41 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         
         setState("applying");
         try {
-            // First, add extracted graphics to the document if available
-            if (brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0) {
+            // Graphics extraction commented out - not needed for now
+            // if (brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0) {
+            //     try {
+            //         console.log(`Adding ${brandKit.graphics.extractedGraphics.length} extracted graphics to document...`);
+            //         for (const graphic of brandKit.graphics.extractedGraphics) {
+            //             const blob = base64ToBlob(graphic.imageBase64, 'image/png');
+            //             await addOnUISdk.app.document.addImage(blob, {
+            //                 title: graphic.name,
+            //                 author: "Brand Kit Extractor"
+            //             });
+            //             console.log(`✅ Added ${graphic.name} to document`);
+            //         }
+            //     } catch (graphicError) {
+            //         console.warn("Could not add graphics to document:", graphicError);
+            //         // Continue even if graphics can't be added
+            //     }
+            // }
+            
+            // Add templates to the document if available
+            if (brandKit.layoutTemplates && brandKit.layoutTemplates.length > 0) {
                 try {
-                    console.log(`Adding ${brandKit.graphics.extractedGraphics.length} extracted graphics to document...`);
-                    for (const graphic of brandKit.graphics.extractedGraphics) {
-                        const blob = base64ToBlob(graphic.imageBase64, 'image/png');
-                        await addOnUISdk.app.document.addImage(blob, {
-                            title: graphic.name,
-                            author: "Brand Kit Extractor"
-                        });
-                        console.log(`✅ Added ${graphic.name} to document`);
+                    console.log(`Adding ${brandKit.layoutTemplates.length} templates to document...`);
+                    for (const template of brandKit.layoutTemplates) {
+                        if (template.example) {
+                            const blob = base64ToBlob(template.example, 'image/png');
+                            await addOnUISdk.app.document.addImage(blob, {
+                                title: template.name,
+                                author: "Brand Kit Template Generator"
+                            });
+                            console.log(`✅ Added template ${template.name} to document`);
+                        }
                     }
-                } catch (graphicError) {
-                    console.warn("Could not add graphics to document:", graphicError);
-                    // Continue even if graphics can't be added
+                } catch (templateError) {
+                    console.warn("Could not add templates to document:", templateError);
+                    // Continue even if templates can't be added
                 }
             }
             
@@ -218,6 +250,84 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to apply brand kit");
             setState("error");
+        }
+    };
+
+    /**
+     * Generate a brand kit template after the brand kit is ready
+     */
+    const handleGenerateTemplate = async () => {
+        if (!brandKit || !referenceImageBase64) {
+            setError("Brand kit and reference image are required to generate templates");
+            return;
+        }
+        
+        setIsGeneratingTemplate(true);
+        setJanusProgress("");
+        setError(null);
+        
+        try {
+            console.log("🎨 Generating brand kit template...");
+            
+            const template = await generateBrandKitTemplate(
+                brandKit,
+                referenceImageBase64,
+                templatePrompt || undefined,
+                (progress) => {
+                    setJanusProgress(progress);
+                }
+            );
+            
+            if (template) {
+                // Update brand kit with the new template
+                const updatedBrandKit = { ...brandKit };
+                if (!updatedBrandKit.layoutTemplates) {
+                    updatedBrandKit.layoutTemplates = [];
+                }
+                
+                // Convert GeneratedTemplate to LayoutTemplate format (same as in brandKitService)
+                updatedBrandKit.layoutTemplates.push({
+                    name: template.name,
+                    type: template.type,
+                    structure: {
+                        sections: [
+                            {
+                                name: "Header",
+                                position: { x: 0, y: 0, width: 100, height: 20 },
+                                content: "text",
+                                recommendedColors: brandKit.colors?.primary?.map((c: any) => c.hex) || []
+                            },
+                            {
+                                name: "Main Content",
+                                position: { x: 0, y: 20, width: 100, height: 60 },
+                                content: "text",
+                                recommendedColors: brandKit.colors?.primary?.map((c: any) => c.hex) || []
+                            },
+                            {
+                                name: "Footer",
+                                position: { x: 0, y: 80, width: 100, height: 20 },
+                                content: "footer",
+                                recommendedColors: brandKit.colors?.neutral?.map((c: any) => c.hex) || []
+                            }
+                        ]
+                    },
+                    usage: template.usage,
+                    example: template.imageBase64
+                });
+                
+                setBrandKit(updatedBrandKit);
+                setJanusProgress("");
+                console.log("✅ Template generated and added to brand kit:", template.name);
+            } else {
+                setJanusProgress("");
+                setError("Template generation failed or was skipped. Please check your backend proxy setup.");
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to generate template");
+            setJanusProgress("");
+            console.error("Error generating template:", err);
+        } finally {
+            setIsGeneratingTemplate(false);
         }
     };
 
@@ -263,6 +373,15 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     contrastRules: selectedForPDF.contrastRules ? brandKit.contrastRules : undefined,
                     communicationStyle: selectedForPDF.communicationStyle ? brandKit.communicationStyle : undefined,
                     tone: selectedForPDF.tone ? brandKit.tone : undefined,
+                    // Include templates in PDF - always include them if they exist
+                    layoutTemplates: brandKit.layoutTemplates || undefined,
+                    // Include other optional fields
+                    brandName: brandKit.brandName,
+                    brandYear: brandKit.brandYear,
+                    designLanguage: brandKit.designLanguage,
+                    brandMessage: brandKit.brandMessage,
+                    characters: brandKit.characters,
+                    imagery: brandKit.imagery,
                 };
 
                 const pdfBlob = await generateBrandGuidelinesPDF(filteredBrandKit);
@@ -271,16 +390,12 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     throw new Error("PDF generation failed - empty file");
                 }
 
-                // Convert blob to data URL for copyable link
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
-                reader.readAsDataURL(pdfBlob);
-            });
+                // Create blob URL instead of data URL to avoid length limitations
+                // Blob URLs are much shorter and don't have the same browser limitations
+                const blobUrl = URL.createObjectURL(pdfBlob);
             
-                // Store the link for user to copy
-                setPdfDownloadLink(dataUrl);
+                // Store the blob URL for download
+                setPdfDownloadLink(blobUrl);
                 setState("ready");
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
@@ -313,6 +428,10 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         setPlatformResults(null);
         setDownloadLinks({});
         setShowExportPanel(false);
+        // Cleanup blob URL before clearing
+        if (pdfDownloadLink && pdfDownloadLink.startsWith('blob:')) {
+            URL.revokeObjectURL(pdfDownloadLink);
+        }
         setPdfDownloadLink(null);
         setIsViewingSavedKit(false);
         setSaveSuccessMessage(null);
@@ -532,10 +651,12 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                 )}
 
                 {state === "idle" && (
-                    <FileUpload 
-                        onFileSelect={handleFileSelect}
-                        disabled={false}
-                    />
+                    <div>
+                        <FileUpload 
+                            onFileSelect={handleFileSelect}
+                            disabled={false}
+                        />
+                    </div>
                 )}
 
                 {state === "uploading" && (
@@ -880,8 +1001,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             </div>
                         )}
 
-                        {/* Extracted Graphics & Icons Preview */}
-                        {brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0 && (
+                        {/* Extracted Graphics & Icons Preview - COMMENTED OUT */}
+                        {false && brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0 && (
                             <div style={{ marginBottom: "16px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
                                     🎨 Extracted Graphics & Icons:
@@ -1079,6 +1200,195 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         )}
 
                         {/* Generated Assets - Patterns */}
+                        
+                        {/* Template Generation Section */}
+                        <div style={{ 
+                            marginBottom: "16px", 
+                            padding: "12px", 
+                            backgroundColor: "#f0f7ff", 
+                            borderRadius: "8px",
+                            border: "1px solid #b3d9ff"
+                        }}>
+                            <p style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "8px" }}>
+                                🎨 Generate Brand Templates
+                            </p>
+                            <div style={{ marginBottom: "12px" }}>
+                                <label style={{ 
+                                    display: "block", 
+                                    fontSize: "11px", 
+                                    fontWeight: "bold", 
+                                    marginBottom: "6px" 
+                                }}>
+                                    Template Instructions (Optional):
+                                </label>
+                                <textarea
+                                    value={templatePrompt}
+                                    onChange={(e) => setTemplatePrompt(e.target.value)}
+                                    placeholder="Enter custom instructions for template generation. For example: 'Create a modern website header template' or 'Design a social media post template with emphasis on the logo'..."
+                                    style={{
+                                        width: "100%",
+                                        minHeight: "70px",
+                                        padding: "8px",
+                                        fontSize: "11px",
+                                        fontFamily: "inherit",
+                                        border: "1px solid #ccc",
+                                        borderRadius: "4px",
+                                        resize: "vertical",
+                                        boxSizing: "border-box"
+                                    }}
+                                    rows={3}
+                                    disabled={isGeneratingTemplate}
+                                />
+                                <p style={{ fontSize: "10px", color: "#666", marginTop: "4px" }}>
+                                    Customize how templates should be generated based on your brand kit. Leave empty to use default template generation.
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleGenerateTemplate}
+                                disabled={isGeneratingTemplate || !referenceImageBase64}
+                                style={{
+                                    fontSize: "11px",
+                                    padding: "8px 16px",
+                                    backgroundColor: isGeneratingTemplate ? "#ccc" : "#007bff",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: isGeneratingTemplate ? "not-allowed" : "pointer",
+                                    fontWeight: "bold"
+                                }}
+                            >
+                                {isGeneratingTemplate ? "Generating Template..." : "Generate Template"}
+                            </button>
+                            {isGeneratingTemplate && janusProgress && (
+                                <div style={{ 
+                                    marginTop: "8px", 
+                                    padding: "8px", 
+                                    backgroundColor: "#e3f2fd", 
+                                    borderRadius: "4px",
+                                    fontSize: "10px",
+                                    color: "#666"
+                                }}>
+                                    {janusProgress}
+                                </div>
+                            )}
+                        </div>
+                        
+                        {/* Brand Templates Section */}
+                        {brandKit.layoutTemplates && brandKit.layoutTemplates.length > 0 && (
+                            <div style={{ 
+                                marginBottom: "16px", 
+                                padding: "12px", 
+                                backgroundColor: "#f9f9f9", 
+                                borderRadius: "8px",
+                                border: "1px solid #e0e0e0"
+                            }}>
+                                <p style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎨 Brand Templates
+                                </p>
+                                {brandKit.layoutTemplates.map((template, index) => (
+                                    <div key={index} style={{ 
+                                        marginBottom: index < brandKit.layoutTemplates!.length - 1 ? "12px" : "0",
+                                        padding: "8px",
+                                        backgroundColor: "white",
+                                        borderRadius: "4px",
+                                        border: "1px solid #ddd"
+                                    }}>
+                                        <div style={{ fontSize: "11px", fontWeight: "bold", marginBottom: "4px" }}>
+                                            {template.name}
+                                        </div>
+                                        {template.usage && (
+                                            <div style={{ fontSize: "10px", color: "#666", marginBottom: "6px" }}>
+                                                {template.usage}
+                                            </div>
+                                        )}
+                                        {template.example && (
+                                            <div style={{ marginTop: "8px" }}>
+                                                <img 
+                                                    src={`data:image/png;base64,${template.example}`}
+                                                    alt={template.name}
+                                                    style={{ 
+                                                        maxWidth: "100%", 
+                                                        height: "auto",
+                                                        borderRadius: "4px",
+                                                        border: "1px solid #ccc",
+                                                        marginBottom: "6px"
+                                                    }}
+                                                />
+                                                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                                    <button
+                                                        onClick={async () => {
+                                                            try {
+                                                                const blob = base64ToBlob(template.example!, 'image/png');
+                                                                await addOnUISdk.app.document.addImage(blob, {
+                                                                    title: template.name,
+                                                                    author: "Brand Kit Template Generator"
+                                                                });
+                                                                console.log(`✅ Added template ${template.name} to document`);
+                                                            } catch (error) {
+                                                                console.error("Error adding template to canvas:", error);
+                                                                setError("Failed to add template to canvas. Please try again.");
+                                                            }
+                                                        }}
+                                                        style={{
+                                                            fontSize: "10px",
+                                                            padding: "4px 8px",
+                                                            backgroundColor: "#28a745",
+                                                            color: "white",
+                                                            border: "none",
+                                                            borderRadius: "4px",
+                                                            cursor: "pointer"
+                                                        }}
+                                                    >
+                                                        Apply to Canvas
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            const blob = base64ToBlob(template.example!, 'image/png');
+                                                            const url = URL.createObjectURL(blob);
+                                                            const a = document.createElement('a');
+                                                            a.href = url;
+                                                            a.download = `${template.name.replace(/\s+/g, '-')}-template.png`;
+                                                            document.body.appendChild(a);
+                                                            a.click();
+                                                            document.body.removeChild(a);
+                                                            URL.revokeObjectURL(url);
+                                                        }}
+                                                        style={{
+                                                            fontSize: "10px",
+                                                            padding: "4px 8px",
+                                                            backgroundColor: "#007bff",
+                                                            color: "white",
+                                                            border: "none",
+                                                            borderRadius: "4px",
+                                                            cursor: "pointer"
+                                                        }}
+                                                    >
+                                                        Download Image
+                                                    </button>
+                                                    <input
+                                                        type="text"
+                                                        readOnly
+                                                        value={`data:image/png;base64,${template.example}`}
+                                                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                                                        style={{
+                                                            fontSize: "9px",
+                                                            padding: "4px",
+                                                            flex: 1,
+                                                            minWidth: "150px",
+                                                            border: "1px solid #ccc",
+                                                            borderRadius: "4px",
+                                                            fontFamily: "monospace"
+                                                        }}
+                                                        title="Click to copy base64 data URL"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {brandKit.generatedAssets && brandKit.generatedAssets.filter(a => a.type === 'pattern').length > 0 && (
                             <div style={{ marginBottom: "16px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
@@ -1694,8 +2004,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                             variant="secondary"
                                             onClick={async () => {
                                                 try {
-                                                    await navigator.clipboard.writeText(pdfDownloadLink);
-                                                    alert("✅ Link copied! Paste it in a new browser tab to download the PDF.");
+                                                    await navigator.clipboard.writeText(pdfDownloadLink!);
+                                                    alert("✅ Link copied! Paste it in a new browser tab to open the PDF.");
                                                 } catch (err) {
                                                     // Fallback: select the input text
                                                     const inputs = document.querySelectorAll('input[type="text"]');
@@ -1704,10 +2014,10 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                                     ) as HTMLInputElement;
                                                     if (pdfInput) {
                                                         pdfInput.select();
-                                                        pdfInput.setSelectionRange(0, pdfDownloadLink.length);
+                                                        pdfInput.setSelectionRange(0, pdfDownloadLink!.length);
                                                         try {
                                                             document.execCommand('copy');
-                                                            alert("✅ Link copied! Paste it in a new browser tab to download the PDF.");
+                                                            alert("✅ Link copied! Paste it in a new browser tab to open the PDF.");
                                                         } catch (e) {
                                                             alert("⚠️ Please manually select and copy the link (Ctrl+C or Cmd+C), then paste it in a new tab.");
                                                         }
@@ -1715,7 +2025,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                                 }
                                             }}
                                         >
-                                            📋 Copy Link
+                                            Copy Link
                                         </Button>
                                     </div>
                                     <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
