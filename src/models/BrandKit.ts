@@ -48,12 +48,25 @@ export interface BrandIcon {
     description?: string;
     usage?: string;
     category?: 'social' | 'navigation' | 'action' | 'decorative' | 'other';
+    imageBase64?: string; // Extracted icon image
+    dimensions?: { width: number; height: number };
+}
+
+export interface ExtractedGraphic {
+    name: string;
+    type: 'logo' | 'icon' | 'badge' | 'emblem' | 'symbol' | 'graphic';
+    description?: string;
+    imageBase64: string; // Cropped/extracted image
+    dimensions: { width: number; height: number };
+    position?: { x: number; y: number; width: number; height: number }; // Original position in image (percentages)
+    usage?: string;
 }
 
 export interface BrandGraphics {
     patterns?: string[]; // Descriptions of patterns used
     illustrations?: string; // Description of illustration style
     icons?: BrandIcon[];
+    extractedGraphics?: ExtractedGraphic[]; // Graphics/logos extracted from the uploaded image
 }
 
 export interface ContrastRule {
@@ -78,7 +91,116 @@ export interface CommunicationStyle {
     communicationApproach: 'direct' | 'friendly' | 'authoritative' | 'approachable'; // Overall communication tone
 }
 
+/**
+ * Color patterns and harmonies extracted from brand
+ */
+export interface ColorPattern {
+    type: 'gradient' | 'harmony' | 'theme' | 'complementary' | 'triadic' | 'analogous';
+    name: string;
+    colors: string[]; // hex colors
+    direction?: 'horizontal' | 'vertical' | 'radial' | 'diagonal';
+    stops?: number[]; // gradient stops (0-1)
+    description?: string;
+    usage?: string; // When to use this pattern
+}
+
+/**
+ * Color theme variations (light, dark, seasonal)
+ */
+export interface ColorTheme {
+    name: string;
+    variant: 'light' | 'dark' | 'seasonal' | 'high-contrast' | 'muted';
+    colors: {
+        primary: string[];
+        secondary: string[];
+        accent: string[];
+        background: string;
+        foreground: string;
+        neutral: string[];
+    };
+    description?: string;
+    useCase?: string; // When to use this theme
+}
+
+/**
+ * Generated visual assets (logos, patterns, textures)
+ */
+export interface GeneratedAsset {
+    type: 'logo' | 'pattern' | 'texture' | 'icon' | 'illustration';
+    variant: string; // e.g., 'full', 'icon', 'monochrome', 'gradient-pattern'
+    base64: string; // base64 encoded image
+    format: 'png' | 'svg' | 'jpg';
+    dimensions?: { width: number; height: number };
+    description?: string;
+    source?: 'janus-generated' | 'extracted' | 'inspired';
+}
+
+/**
+ * Layout template structures
+ */
+export interface LayoutTemplate {
+    name: string;
+    type: 'hero' | 'card' | 'grid' | 'sidebar' | 'fullscreen' | 'magazine' | 'minimal';
+    structure: {
+        sections: Array<{
+            name: string;
+            position: { x: number; y: number; width: number; height: number }; // percentages
+            content: 'text' | 'image' | 'logo' | 'cta' | 'navigation' | 'footer';
+            recommendedColors?: string[]; // hex colors
+        }>;
+    };
+    usage?: string;
+    example?: string; // base64 preview image
+}
+
+/**
+ * Typography system with detailed specifications
+ */
+export interface TypographySystem {
+    fontFamilies: {
+        primary: string;
+        secondary?: string;
+        accent?: string;
+        monospace?: string;
+    };
+    scale: {
+        base: number; // base font size
+        ratio: number; // modular scale ratio (e.g., 1.25 for Major Third)
+        sizes: {
+            display?: number;
+            h1?: number;
+            h2?: number;
+            h3?: number;
+            h4?: number;
+            body?: number;
+            small?: number;
+            caption?: number;
+        };
+    };
+    weights: {
+        light?: number;
+        regular: number;
+        medium?: number;
+        bold: number;
+        black?: number;
+    };
+    lineHeights: {
+        tight: number;
+        normal: number;
+        relaxed: number;
+    };
+    letterSpacing?: {
+        tight: number;
+        normal: number;
+        wide: number;
+    };
+}
+
 export interface BrandKit {
+    // Core Brand Elements
+    brandName?: string;
+    brandYear?: string;
+    designLanguage?: string;
     colors: {
         primary: BrandColor[];
         secondary: BrandColor[];
@@ -86,45 +208,99 @@ export interface BrandKit {
         neutral: BrandColor[];
     };
     typography: BrandTypography[];
+    typographySystem?: TypographySystem; // Comprehensive typography system
     logos: BrandLogo;
     spacing: BrandSpacing;
+    
+    // Enhanced Features
+    colorPatterns?: ColorPattern[]; // Gradients, harmonies, themes
+    colorThemes?: ColorTheme[]; // Light/dark/seasonal variations
+    generatedAssets?: GeneratedAsset[]; // AI-generated logos, patterns, textures
+    layoutTemplates?: LayoutTemplate[]; // Pre-designed layout structures
+    characters?: BrandCharacter[]; // Brand mascots and characters
+    imagery?: BrandImagery; // Imagery guidelines and themes
+    
+    // Existing Features
     graphics?: BrandGraphics;
     contrastRules?: ContrastRule[];
     communicationStyle?: CommunicationStyle; // Inferred communication rules for AI content generation
     tone?: string; // Brand tone description
+    brandMessage?: string; // Core brand message or tagline
     guidelines?: string; // Generated guidelines text
+    
+    // Metadata
+    extractedFrom?: string; // Source file name
+    extractionDate?: string; // ISO date string
+    version?: string; // Brand kit version
+}
+
+export interface BrandCharacter {
+    name: string;
+    type: 'mascot' | 'character' | 'symbol';
+    element?: 'earth' | 'water' | 'fire' | 'air' | 'other';
+    description: string;
+    usage?: string;
+}
+
+export interface BrandImagery {
+    style?: string;
+    guidelines?: string[];
+    themes?: string[];
 }
 
 export interface MistralExtractionResult {
+    brand_name?: string;
+    brand_year?: string;
+    design_language?: string;
     colors: {
         primary: string[];
         secondary: string[];
         accent: string[];
         neutral?: string[];
+        background?: string[];
+        foreground?: string[];
+    };
+    color_meaning?: {
+        earth?: string[];
+        water?: string[];
+        fire?: string[];
+        air?: string[];
     };
     typography: {
         heading?: {
             font: string;
             weight: string;
             size?: number;
+            style?: string;
         };
         subheading?: {
             font: string;
             weight: string;
             size?: number;
+            style?: string;
         };
         body?: {
             font: string;
             weight: string;
             size?: number;
+            style?: string;
         };
         caption?: {
+            font: string;
+            weight: string;
+            size?: number;
+            style?: string;
+        };
+        display?: {
             font: string;
             weight: string;
             size?: number;
         };
     };
     logos?: {
+        wordmark_description?: string;
+        logomark_description?: string;
+        logo_style?: string;
         full?: string;
         icon?: string;
         monochrome?: string;
@@ -147,6 +323,18 @@ export interface MistralExtractionResult {
         paragraph_gap?: number;
         element_padding?: number;
     };
+    characters?: Array<{
+        name: string;
+        type: string;
+        element?: string;
+        description: string;
+        usage?: string;
+    }>;
+    imagery?: {
+        style?: string;
+        guidelines?: string[];
+        themes?: string[];
+    };
     graphics?: {
         patterns?: string[];
         illustrations?: string;
@@ -155,6 +343,19 @@ export interface MistralExtractionResult {
             description?: string;
             usage?: string;
             category?: string;
+        }>;
+        textures?: string[];
+        visible_logos?: Array<{
+            name: string;
+            type: string;
+            description?: string;
+            position: {
+                x: number;
+                y: number;
+                width: number;
+                height: number;
+            };
+            usage?: string;
         }>;
     };
     contrast_rules?: Array<{
@@ -172,4 +373,5 @@ export interface MistralExtractionResult {
         communication_approach?: 'direct' | 'friendly' | 'authoritative' | 'approachable';
     };
     tone?: string;
+    brand_message?: string;
 }

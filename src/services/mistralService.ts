@@ -243,36 +243,58 @@ export async function extractBrandKitFromImage(file: File): Promise<MistralExtra
 
         const imageBase64 = await fileToBase64(file);
 
-        const prompt = `You are a brand identity expert. Analyze this image (which could be a website screenshot, app UI, poster, or brand material) and extract the complete brand kit information.
+        const prompt = `You are a brand identity expert. Analyze this image or PDF (which could be a brand kit document, website screenshot, app UI, poster, or brand material) and extract the COMPLETE and COMPREHENSIVE brand kit information.
+
+This may be a brand kit PDF with detailed guidelines. Extract ALL information including logos, colors, typography, characters, imagery, and design language.
 
 Extract the following information and return ONLY a valid JSON object with no additional text:
 
 {
+  "brand_name": "brand name if visible",
+  "brand_year": "year or event name if visible (e.g., '2025', 'Moksha'25')",
+  "design_language": "detailed description of the design style, aesthetic, and visual approach (e.g., 'Mythical Echoes blends earthy tones with mystical hues, incorporating natural textures like moss and bark enhanced by soft glows')",
   "colors": {
     "primary": ["#hex1", "#hex2"],
     "secondary": ["#hex3"],
     "accent": ["#hex4"],
-    "neutral": ["#hex5", "#hex6"]
+    "neutral": ["#hex5", "#hex6"],
+    "background": ["#hex7"],
+    "foreground": ["#hex8"]
+  },
+  "color_meaning": {
+    "earth": ["#hex colors representing earth element"],
+    "water": ["#hex colors representing water element"],
+    "fire": ["#hex colors representing fire element"],
+    "air": ["#hex colors representing air element"]
   },
   "typography": {
     "heading": {
-      "font": "font family name (approximate if exact name not visible, e.g., 'Sans-serif', 'Serif', 'Display')",
-      "weight": "light|regular|medium|bold|black",
-      "size": number_in_points
+      "font": "exact font family name if visible (e.g., 'Cinzel', 'Playfair Display', 'EB Garamond') or approximate if not visible",
+      "weight": "light|regular|medium|bold|black|semi-bold",
+      "size": number_in_points,
+      "style": "normal|italic"
     },
     "subheading": {
       "font": "font family name",
-      "weight": "light|regular|medium|bold|black",
-      "size": number_in_points
+      "weight": "light|regular|medium|bold|black|semi-bold",
+      "size": number_in_points,
+      "style": "normal|italic"
     },
     "body": {
       "font": "font family name",
-      "weight": "light|regular|medium|bold|black",
-      "size": number_in_points
+      "weight": "light|regular|medium|bold|black|semi-bold",
+      "size": number_in_points,
+      "style": "normal|italic"
     },
     "caption": {
       "font": "font family name",
-      "weight": "light|regular|medium|bold|black",
+      "weight": "light|regular|medium|bold|black|semi-bold",
+      "size": number_in_points,
+      "style": "normal|italic"
+    },
+    "display": {
+      "font": "font family name for large display text",
+      "weight": "light|regular|medium|bold|black|semi-bold",
       "size": number_in_points
     }
   },
@@ -283,22 +305,54 @@ Extract the following information and return ONLY a valid JSON object with no ad
     "element_padding": number
   },
   "logos": {
+    "wordmark_description": "detailed description of the wordmark logo (e.g., 'sharp angular typeface inspired by dragon spikes, M symbolizes dragon head with pointed horns, A forms tail')",
+    "logomark_description": "detailed description of the logomark/icon (e.g., 'front-facing dragon mascot integrated with letter M')",
+    "logo_style": "description of logo style (geometric, organic, minimalist, ornate, etc.)",
     "styles": {
-      "clear_space": "minimum clear space requirement (e.g., '2x logo height' or '24px')",
-      "min_size": "minimum size requirement (e.g., '24px' or '0.5in')",
-      "usage": ["guideline 1", "guideline 2"],
+      "clear_space": "minimum clear space requirement (e.g., '10% of logo width', '2x logo height', '24px')",
+      "min_size": "minimum size requirement (e.g., '50px height for digital', '1.5cm for print')",
+      "usage": ["guideline 1", "guideline 2", "guideline 3"],
       "donts": ["what not to do 1", "what not to do 2"]
     }
   },
+  "characters": [
+    {
+      "name": "character name (e.g., 'Dragon', 'Kelpie', 'Phoenix')",
+      "type": "mascot|character|symbol",
+      "element": "earth|water|fire|air|other",
+      "description": "detailed description of the character for image generation",
+      "usage": "when and how to use this character"
+    }
+  ],
+  "imagery": {
+    "style": "description of imagery style (e.g., 'mythical motifs such as glowing mushrooms, enchanted castles, fantastical creatures')",
+    "guidelines": ["imagery guideline 1", "imagery guideline 2"],
+    "themes": ["theme 1", "theme 2"]
+  },
   "graphics": {
     "patterns": ["description of pattern 1", "description of pattern 2"],
-    "illustrations": "description of illustration style (e.g., 'Minimalist line art', 'Bold geometric shapes', 'Hand-drawn sketches')",
+    "illustrations": "description of illustration style (e.g., 'Minimalist line art', 'Bold geometric shapes', 'Hand-drawn sketches', 'Organic flowing shapes merged with geometric patterns')",
     "icons": [
       {
         "name": "icon name or category",
         "description": "description of icon style",
         "usage": "when to use",
         "category": "social|navigation|action|decorative|other"
+      }
+    ],
+    "textures": ["description of texture 1 (e.g., 'moss', 'bark', 'natural textures')"],
+    "visible_logos": [
+      {
+        "name": "logo/graphic name (e.g., 'NSS Logo', 'NSUT Logo', 'Company Badge')",
+        "type": "logo|icon|badge|emblem|symbol|graphic",
+        "description": "detailed description of the logo/graphic",
+        "position": {
+          "x": number (percentage 0-100, approximate horizontal position from left),
+          "y": number (percentage 0-100, approximate vertical position from top),
+          "width": number (percentage 0-100, approximate width),
+          "height": number (percentage 0-100, approximate height)
+        },
+        "usage": "when and how to use this graphic"
       }
     ]
   },
@@ -318,20 +372,43 @@ Extract the following information and return ONLY a valid JSON object with no ad
     "cta_style": "aggressive|subtle|moderate (infer from call-to-action prominence and language)",
     "communication_approach": "direct|friendly|authoritative|approachable (infer from overall brand personality)"
   },
-  "tone": "brief description of brand tone (e.g., 'Professional and modern', 'Playful and energetic')"
+  "tone": "brief description of brand tone (e.g., 'Mythical and harmonious, inviting reflection on nature and protection')",
+  "brand_message": "core brand message or tagline if visible"
 }
 
 Important guidelines:
-1. For colors: Identify the most prominent colors and categorize them by their visual role (primary = main brand colors, secondary = supporting colors, accent = highlights, neutral = grays/backgrounds)
-2. For typography: Infer font family from appearance (Sans-serif, Serif, etc.) and estimate weights. Identify which text is heading vs body vs caption based on size and visual hierarchy.
-3. For spacing: Analyze gaps between sections, paragraphs, and elements to determine the spacing system (often based on an 8px or 4px grid)
-4. For logos: If a logo is visible, describe its style guidelines (clear space, minimum size, usage rules, what not to do). Note variations if visible (horizontal, vertical, stacked).
-5. For graphics: Identify any patterns, illustration styles, or icon styles used in the design. Describe their characteristics and usage.
-6. For contrast rules: Analyze text-on-background combinations and determine WCAG contrast ratios. Include common combinations like primary text on white, white text on primary color, etc.
-7. For communication_style: Infer these from visual design, text content, and overall brand presentation. Analyze: design sophistication (enterprise vs consumer), language used (formal vs casual), CTA prominence (aggressive vs subtle), and overall brand personality. These are inferred rules for AI content generation to maintain brand consistency.
-8. Return valid JSON only, no markdown formatting or explanations. Use empty arrays/objects if information is not visible.
+1. For colors: Extract ALL color hex codes visible. If colors are organized by elements (earth, water, fire, air), include them in color_meaning. Identify the most prominent colors and categorize them by their visual role (primary = main brand colors, secondary = supporting colors, accent = highlights, neutral = grays/backgrounds).
+2. For typography: Extract EXACT font names if visible in the document (e.g., 'Cinzel', 'Playfair Display', 'EB Garamond', 'Against', 'Firlest'). Include all font weights mentioned (regular, bold, semi-bold, italic, etc.). Identify which text is heading vs body vs caption based on size and visual hierarchy.
+3. For logos: Extract detailed descriptions of wordmark and logomark. These descriptions will be used for AI image generation, so be very specific about visual elements, shapes, and style.
+4. For characters: If mascots or characters are mentioned (e.g., Dragon, Kelpie, Reindeer, Phoenix, Pegasus), extract their names, descriptions, and associated elements. These will be used for image generation.
+5. For imagery: Extract imagery style descriptions, themes, and guidelines. Be specific about visual motifs, styles, and usage.
+6. For design_language: Extract the overall design philosophy, aesthetic description, and visual approach. This is crucial for maintaining brand consistency.
+7. For spacing: Analyze gaps between sections, paragraphs, and elements to determine the spacing system (often based on an 8px or 4px grid).
+8. For graphics: Identify any patterns (geometric, organic, abstract), illustration styles, textures, or icon styles used. Be specific about characteristics, colors used, and usage contexts.
+9. For contrast rules: Analyze text-on-background combinations and determine WCAG contrast ratios.
+10. For characters: Even if no explicit characters/mascots are visible, infer potential brand mascots or symbolic characters based on the design style, colors, and theme. For example, if the design has nature themes, suggest characters like animals or nature spirits. If tech-focused, suggest abstract or geometric characters. Be creative but relevant.
 
-Now analyze the image and return the JSON:`;
+11. For imagery: Even if specific imagery isn't shown, describe the type of imagery that would fit this brand based on the design language, colors, and overall aesthetic. Suggest themes, styles, and visual motifs that align with the brand identity.
+
+12. For design_language: Create a compelling, detailed description of the design aesthetic. This should be comprehensive and capture the essence of the brand's visual identity, even if inferred from limited information.
+
+13. For visible_logos: This is THE MOST IMPORTANT task. Identify ALL visible logos, badges, emblems, icons, and graphics in the image. Look carefully at every corner and section of the image. For each graphic element you find, provide:
+    - Exact name if visible (e.g., "NSS Logo", "NSUT Logo", "Company Badge", "Event Emblem")
+    - Type (logo, icon, badge, emblem, symbol, graphic)
+    - Approximate position as percentages (x, y, width, height) - be as accurate as possible. 
+      * x: horizontal position of top-left corner (0-100, where 0 is left edge, 100 is right edge)
+      * y: vertical position of top-left corner (0-100, where 0 is top edge, 100 is bottom edge)
+      * width: horizontal width of the graphic (0-100, as percentage of image width)
+      * height: vertical height of the graphic (0-100, as percentage of image height)
+      * IMPORTANT: Be precise with positions. If a logo is in the top-left corner, use small x and y values (e.g., x: 5, y: 5). If it's centered, use values around 50. If it's bottom-right, use large values (e.g., x: 85, y: 90).
+      * For width and height, estimate the actual size relative to the image. A small icon might be 5-10%, while a large logo might be 20-30%.
+    - Description of what it looks like (colors, shapes, text if any, distinctive features)
+    - Usage context if apparent
+    These graphics will be automatically extracted and cropped from the image to be included in the brand kit for designers to use directly. Be thorough and identify every graphic element. Accuracy in position detection is critical for successful extraction.
+
+14. IMPORTANT: Do not use special characters like asterisks, exclamation marks, arrows, or emojis in any text fields. Use plain text only. Return valid JSON only, no markdown formatting or explanations. Use empty arrays/objects only if absolutely no information can be inferred. Be creative and comprehensive in your extraction.
+
+Now analyze the image/PDF and return the JSON:`;
 
         let result;
         let lastError;

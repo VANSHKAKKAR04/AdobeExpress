@@ -6,7 +6,8 @@
         "module": "ESNext",
         "moduleResolution": "node",
         "outDir": "dist",
-        "target": "ESNext"
+        "target": "ESNext",
+        "lib": ["ES2020", "DOM", "DOM.Iterable"]
     },
     "exclude": ["node_modules"],
     "include": ["src/**/*"]
