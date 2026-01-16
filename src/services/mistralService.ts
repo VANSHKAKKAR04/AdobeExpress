@@ -470,6 +470,33 @@ Troubleshooting steps:
         }
 
         const brandKit = JSON.parse(jsonText) as MistralExtractionResult;
+        
+        // Always try to extract logo images using V2 pipeline
+        try {
+            // Use V2 pipeline: Detect → Crop → Refine → Filter
+            const extractedLogos = await extractLogosFromImageV2(file);
+            
+            if (extractedLogos && extractedLogos.length > 0) {
+                // Store the extracted logo images
+                brandKit.logos = brandKit.logos || {};
+                // Store first logo as 'full' for backward compatibility
+                brandKit.logos.full = extractedLogos[0].imageBase64;
+                // Store all logos in a new 'allLogos' array with V2 format
+                (brandKit.logos as any).allLogos = extractedLogos.map(logo => ({
+                    image: logo.imageBase64,
+                    description: logo.name,
+                    name: logo.name,
+                    confidence: logo.confidence
+                }));
+                console.log(`✅ Stored ${extractedLogos.length} confirmed logo(s) in brand kit`);
+            } else {
+                console.log("ℹ️ No logos confirmed by V2 pipeline");
+            }
+        } catch (logoError) {
+            console.warn("Logo extraction failed, continuing without logo images:", logoError);
+            // Continue without logo images - this is optional
+        }
+        
         return brandKit;
 
     } catch (error) {
@@ -479,39 +506,59 @@ Troubleshooting steps:
 }
 
 /**
- * Extract logo from image using Mistral Vision API
- * This tries to identify and describe the logo area for extraction
+ * Step 1: Detect logo regions in an image
+ * Returns array of detected logos with bounding boxes
  */
-export async function extractLogosFromImage(file: File): Promise<{ full?: string; icon?: string }> {
+async function detectLogoRegions(
+    file: File,
+    imageBase64: string
+): Promise<Array<{
+    name: string;
+    boundingBox: { x: number; y: number; width: number; height: number };
+    confidence: number;
+}>> {
     try {
         if (!MISTRAL_API_KEY) {
-            console.warn("MISTRAL_API_KEY is not set, skipping logo extraction...");
-            return {};
+            console.warn("MISTRAL_API_KEY is not set, skipping logo detection...");
+            return [];
         }
 
-        const imageBase64 = await fileToBase64(file);
+        // Get image dimensions first
+        const imageDimensions = await getImageDimensions(imageBase64);
 
-        const prompt = `Analyze this image and identify if there's a logo present. If a logo is found, describe its characteristics:
+        // STEP 1: Detection - Identify logos with coordinates and confidence
+        const prompt = `Identify all brand or organizational logos in this image. 
 
-1. Is there a full logo (wordmark + icon/symbol)?
-2. Is there a standalone icon mark?
-3. What are the approximate dimensions and position of the logo?
+The image dimensions are: ${imageDimensions.width}x${imageDimensions.height} pixels.
 
-Return a JSON object:
+For each logo, return:
+- name (if recognizable, otherwise "Unknown Logo")
+- bounding box in pixel coordinates (x, y, width, height)
+- confidence score (0–1)
+
+Return ONLY valid JSON in this format:
 {
-  "hasFullLogo": boolean,
-  "hasIconMark": boolean,
-  "logoPosition": "description",
-  "logoDimensions": "description"
+  "logos": [
+    {
+      "name": "string (logo name if recognizable, else 'Unknown Logo')",
+      "boundingBox": {
+        "x": number (pixel X of top-left corner, 0 to ${imageDimensions.width}),
+        "y": number (pixel Y of top-left corner, 0 to ${imageDimensions.height}),
+        "width": number (pixel width, must be > 0),
+        "height": number (pixel height, must be > 0)
+      },
+      "confidence": number (0.0 to 1.0)
+    }
+  ]
 }
 
-If no logo is found, return:
-{
-  "hasFullLogo": false,
-  "hasIconMark": false
-}
+IMPORTANT:
+- Only identify real brand/organization logos (not decorative icons)
+- Each logo should have its own separate bounding box
+- Ensure x + width <= ${imageDimensions.width} and y + height <= ${imageDimensions.height}
+- If no logos found, return: {"logos": []}
 
-Return ONLY valid JSON, no additional text.`;
+Return ONLY valid JSON, no markdown, no explanations.`;
 
         // Try vision models
         const modelsToTry = [
@@ -519,31 +566,531 @@ Return ONLY valid JSON, no additional text.`;
             "pixtral-12b",
         ];
 
+        let logoInfo: any = null;
         for (const modelName of modelsToTry) {
             try {
-                await queryMistral(prompt, imageBase64, file.type || "image/png", modelName);
-                console.log(`Using model ${modelName} for logo extraction`);
+                // Use base64 without data URL prefix for API
+                const imageBase64ForAPI = imageBase64.includes(',') 
+                    ? imageBase64.split(',')[1] 
+                    : imageBase64;
+                
+                const response = await queryMistral(prompt, imageBase64ForAPI, file.type || "image/png", modelName);
+                
+                // Clean and parse response
+                let jsonText = response.trim();
+                if (jsonText.startsWith("```json")) {
+                    jsonText = jsonText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+                } else if (jsonText.startsWith("```")) {
+                    jsonText = jsonText.replace(/```\n?/g, "");
+                }
+                
+                logoInfo = JSON.parse(jsonText);
+                console.log(`Step 1 (Detection): Using model ${modelName}`, logoInfo);
                 break;
             } catch (error: any) {
                 if (error.message?.includes("404") || error.message?.includes("not found")) {
                     continue; // Try next model
                 }
-                throw error; // Other errors should be thrown
+                console.warn(`Model ${modelName} failed:`, error.message);
+                continue;
             }
         }
 
-        // For MVP, we'll return empty logos - logo extraction would require image segmentation
-        // which is beyond the scope of this MVP. In production, you could use vision APIs
-        // with image cropping or computer vision libraries.
+        // Validate detection results
+        if (!logoInfo || !logoInfo.logos || logoInfo.logos.length === 0) {
+            console.log("Step 1 (Detection): No logos detected in image");
+            return [];
+        }
 
-        return {
-            // Logo extraction from screenshots requires image segmentation
-            // For MVP, we'll create placeholder logos or skip this step
-        };
+        console.log(`Step 1 (Detection): Found ${logoInfo.logos.length} logo(s)`);
+        
+        // Return detected regions
+        return logoInfo.logos.map((logo: any) => ({
+            name: logo.name || "Unknown Logo",
+            boundingBox: logo.boundingBox || logo.logoBox,
+            confidence: logo.confidence || 0
+        }));
+
+    } catch (error) {
+        console.error("Error detecting logo regions:", error);
+        return [];
+    }
+}
+
+/**
+ * Extract logo from image using Mistral Vision API (V1 - legacy)
+ * Identifies logo location and extracts the actual logo image
+ */
+export async function extractLogosFromImage(
+    file: File,
+    originalImageBase64: string
+): Promise<{ logos: Array<{ image: string; description?: string }> }> {
+    try {
+        if (!MISTRAL_API_KEY) {
+            console.warn("MISTRAL_API_KEY is not set, skipping logo extraction...");
+            return { logos: [] };
+        }
+
+        // Get image dimensions first
+        const imageDimensions = await getImageDimensions(originalImageBase64);
+
+        // STEP 1: Detection - Identify logos with coordinates and confidence
+        const prompt = `Identify all brand or organizational logos in this image. 
+
+The image dimensions are: ${imageDimensions.width}x${imageDimensions.height} pixels.
+
+For each logo, return:
+- name (if recognizable, otherwise "Unknown Logo")
+- bounding box in pixel coordinates (x, y, width, height)
+- confidence score (0–1)
+
+Return ONLY valid JSON in this format:
+{
+  "logos": [
+    {
+      "name": "string (logo name if recognizable, else 'Unknown Logo')",
+      "boundingBox": {
+        "x": number (pixel X of top-left corner, 0 to ${imageDimensions.width}),
+        "y": number (pixel Y of top-left corner, 0 to ${imageDimensions.height}),
+        "width": number (pixel width, must be > 0),
+        "height": number (pixel height, must be > 0)
+      },
+      "confidence": number (0.0 to 1.0)
+    }
+  ]
+}
+
+IMPORTANT:
+- Only identify real brand/organization logos (not decorative icons)
+- Each logo should have its own separate bounding box
+- Ensure x + width <= ${imageDimensions.width} and y + height <= ${imageDimensions.height}
+- If no logos found, return: {"logos": []}
+
+Return ONLY valid JSON, no markdown, no explanations.`;
+
+        // Try vision models
+        const modelsToTry = [
+            "pixtral-large-latest",
+            "pixtral-12b",
+        ];
+
+        let logoInfo: any = null;
+        for (const modelName of modelsToTry) {
+            try {
+                // Use base64 without data URL prefix for API
+                const imageBase64ForAPI = originalImageBase64.includes(',') 
+                    ? originalImageBase64.split(',')[1] 
+                    : originalImageBase64;
+                
+                const response = await queryMistral(prompt, imageBase64ForAPI, file.type || "image/png", modelName);
+                
+                // Clean and parse response
+                let jsonText = response.trim();
+                if (jsonText.startsWith("```json")) {
+                    jsonText = jsonText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+                } else if (jsonText.startsWith("```")) {
+                    jsonText = jsonText.replace(/```\n?/g, "");
+                }
+                
+                logoInfo = JSON.parse(jsonText);
+                console.log(`Step 1 (Detection): Using model ${modelName}`, logoInfo);
+                break;
+            } catch (error: any) {
+                if (error.message?.includes("404") || error.message?.includes("not found")) {
+                    continue; // Try next model
+                }
+                console.warn(`Model ${modelName} failed:`, error.message);
+                continue;
+            }
+        }
+
+        // STEP 1: Validate detection results
+        if (!logoInfo || !logoInfo.logos || logoInfo.logos.length === 0) {
+            console.log("Step 1 (Detection): No logos detected in image");
+            return { logos: [] };
+        }
+
+        console.log(`Step 1 (Detection): Found ${logoInfo.logos.length} logo(s)`);
+
+        // STEP 2: Crop each detected logo
+        const extractedLogos: Array<{ image: string; description?: string }> = [];
+
+        for (let i = 0; i < logoInfo.logos.length; i++) {
+            const logo = logoInfo.logos[i];
+            const box = logo.boundingBox || logo.logoBox; // Support both formats
+
+            // Validate coordinates
+            if (!box || !box.x || !box.y || !box.width || !box.height || 
+                box.width <= 0 || box.height <= 0 ||
+                box.x < 0 || box.y < 0 ||
+                box.x + box.width > imageDimensions.width ||
+                box.y + box.height > imageDimensions.height) {
+                console.warn(`Step 2 (Crop): Invalid coordinates for logo ${i + 1}, skipping`);
+                continue;
+            }
+
+            // Filter by confidence if available
+            if (logo.confidence !== undefined && logo.confidence < 0.5) {
+                console.warn(`Step 2 (Crop): Logo ${i + 1} has low confidence (${logo.confidence}), skipping`);
+                continue;
+            }
+
+            // Filter out logos that are too large (likely include background elements)
+            const maxLogoWidth = imageDimensions.width * 0.3;
+            const maxLogoHeight = imageDimensions.height * 0.3;
+            
+            if (box.width > maxLogoWidth || box.height > maxLogoHeight) {
+                console.warn(`Step 2 (Crop): Logo ${i + 1} is too large (${box.width}x${box.height}), skipping`);
+                continue;
+            }
+
+            // Filter out very small logos (likely noise)
+            if (box.width < 20 || box.height < 20) {
+                console.warn(`Step 2 (Crop): Logo ${i + 1} is too small (${box.width}x${box.height}), skipping`);
+                continue;
+            }
+
+            try {
+                // STEP 2: Crop the logo
+                const logoBase64 = await cropImageFromBase64(
+                    originalImageBase64,
+                    Math.max(0, box.x),
+                    Math.max(0, box.y),
+                    Math.min(box.width, imageDimensions.width - box.x),
+                    Math.min(box.height, imageDimensions.height - box.y)
+                );
+
+                extractedLogos.push({
+                    image: logoBase64,
+                    description: logo.name || logo.description || `Logo ${i + 1}`
+                });
+                
+                console.log(`Step 2 (Crop): Extracted logo ${i + 1} - ${logo.name || 'Unknown'} (${box.width}x${box.height}px, confidence: ${logo.confidence || 'N/A'})`);
+            } catch (error) {
+                console.warn(`Step 2 (Crop): Failed to extract logo ${i + 1}:`, error);
+                continue;
+            }
+        }
+
+        console.log(`✅ Pipeline complete: Extracted ${extractedLogos.length} logo(s) successfully`);
+        return { logos: extractedLogos };
 
     } catch (error) {
         console.error("Error extracting logos:", error);
-        // Return empty logos on error - logo extraction is optional for MVP
-        return {};
+        return { logos: []         };
     }
+}
+
+/**
+ * V2: Orchestrator function for multi-step logo extraction pipeline
+ * Flow: Detect → Crop → Refine → Filter
+ * 
+ * Returns final array of clean logos in format: { name, imageBase64, confidence }
+ * 
+ * This is an additive, backward-compatible upgrade.
+ * The existing Stage 1 logic (extractLogosFromImage) remains unchanged.
+ */
+export async function extractLogosFromImageV2(file: File): Promise<Array<{
+    name: string;
+    imageBase64: string;
+    confidence: number;
+}>> {
+    try {
+        console.log("🚀 Starting V2 logo extraction pipeline");
+        
+        // Convert file → base64 + mime type
+        const mimeType = file.type || "image/png";
+        const fullImageBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+
+        // Get base64 without data URL prefix for detection
+        const imageBase64ForDetection = fullImageBase64.includes(',') 
+            ? fullImageBase64.split(',')[1] 
+            : fullImageBase64;
+
+        // Step 1: Call detectLogoRegions
+        const detectedRegions = await detectLogoRegions(file, fullImageBase64);
+        
+        if (detectedRegions.length === 0) {
+            console.log("No logo regions detected");
+            return [];
+        }
+
+        console.log(`Found ${detectedRegions.length} logo region(s) to process`);
+
+        // Process each detected region
+        const results: Array<{
+            name: string;
+            imageBase64: string;
+            confidence: number;
+        }> = [];
+
+        for (let i = 0; i < detectedRegions.length; i++) {
+            const region = detectedRegions[i];
+            
+            try {
+                // Step 2: Crop using cropImageRegion (returns base64 without data URL prefix)
+                const croppedBase64NoPrefix = await cropImageRegion(
+                    imageBase64ForDetection,
+                    mimeType,
+                    region.boundingBox
+                );
+
+                // Step 3: Call refineLogoCrop (needs base64 with data URL prefix for Image object)
+                const croppedBase64WithPrefix = `data:${mimeType};base64,${croppedBase64NoPrefix}`;
+                const refinement = await refineLogoCrop(croppedBase64WithPrefix);
+
+                // Step 4: Keep only items where confirmed === true and confidence >= 0.6
+                if (refinement.confirmed === true && refinement.confidence >= 0.6) {
+                    results.push({
+                        name: refinement.name,
+                        imageBase64: croppedBase64WithPrefix, // Return with data URL prefix for UI usage
+                        confidence: refinement.confidence
+                    });
+                    console.log(`✅ Logo ${i + 1} confirmed: ${refinement.name} (confidence: ${refinement.confidence})`);
+                } else {
+                    console.log(`❌ Logo ${i + 1} rejected: confirmed=${refinement.confirmed}, confidence=${refinement.confidence}`);
+                }
+            } catch (error) {
+                console.warn(`Failed to process logo region ${i + 1}:`, error);
+                continue;
+            }
+        }
+
+        console.log(`✅ Pipeline complete: ${results.length} logo(s) extracted and confirmed`);
+        return results;
+
+    } catch (error) {
+        console.error("Error in V2 logo extraction pipeline:", error);
+        return [];
+    }
+}
+
+/**
+ * Get image dimensions from base64
+ */
+function getImageDimensions(imageBase64: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            resolve({ width: img.width, height: img.height });
+        };
+        img.onerror = reject;
+        img.src = imageBase64;
+    });
+}
+
+/**
+ * Refine logo crop by confirming if it's a real brand/organizational logo
+ */
+async function refineLogoCrop(croppedBase64: string): Promise<{
+    confirmed: boolean;
+    name: string;
+    description?: string;
+    confidence: number;
+}> {
+    console.log("Step 3 (Refine): Sending crop to AI for confirmation");
+    
+    try {
+        if (!MISTRAL_API_KEY) {
+            console.warn("MISTRAL_API_KEY is not set, skipping refinement...");
+            return {
+                confirmed: false,
+                name: "Unknown Logo",
+                confidence: 0
+            };
+        }
+
+        const prompt = `This image is a possible logo.
+Confirm if it is a real brand or organizational logo.
+If yes, return:
+{
+  "confirmed": true,
+  "name": "string (logo name if recognizable, else 'Unknown Logo')",
+  "description": "string (short description of the logo)",
+  "confidence": number (0.0 to 1.0)
+}
+If not a real logo, return:
+{
+  "confirmed": false,
+  "confidence": number (0.0 to 1.0)
+}
+Return ONLY strict JSON.`;
+
+        // Try vision models
+        const modelsToTry = [
+            "pixtral-large-latest",
+            "pixtral-12b",
+        ];
+
+        let result: any = null;
+        for (const modelName of modelsToTry) {
+            try {
+                // Prepare base64 for API (ensure it doesn't have data URL prefix)
+                const base64ForAPI = croppedBase64.includes(',') 
+                    ? croppedBase64.split(',')[1] 
+                    : croppedBase64;
+                
+                const response = await queryMistral(prompt, base64ForAPI, "image/png", modelName);
+                
+                // Clean and parse response
+                let jsonText = response.trim();
+                if (jsonText.startsWith("```json")) {
+                    jsonText = jsonText.replace(/```json\n?/g, "").replace(/```\n?/g, "");
+                } else if (jsonText.startsWith("```")) {
+                    jsonText = jsonText.replace(/```\n?/g, "");
+                }
+                
+                result = JSON.parse(jsonText);
+                console.log("Step 3 (Refine): Result", result);
+                break;
+            } catch (error: any) {
+                if (error.message?.includes("404") || error.message?.includes("not found")) {
+                    continue; // Try next model
+                }
+                console.warn(`Model ${modelName} failed for refinement:`, error.message);
+                continue;
+            }
+        }
+
+        // Validate and return result
+        if (!result) {
+            console.warn("Step 3 (Refine): No valid response from AI, defaulting to unconfirmed");
+            return {
+                confirmed: false,
+                name: "Unknown Logo",
+                confidence: 0
+            };
+        }
+
+        // Ensure required fields
+        if (result.confirmed === true) {
+            return {
+                confirmed: true,
+                name: result.name || "Unknown Logo",
+                description: result.description,
+                confidence: typeof result.confidence === 'number' ? result.confidence : 0.5
+            };
+        } else {
+            return {
+                confirmed: false,
+                name: "Unknown Logo",
+                confidence: typeof result.confidence === 'number' ? result.confidence : 0
+            };
+        }
+
+    } catch (error) {
+        console.error("Step 3 (Refine): Error during refinement:", error);
+        return {
+            confirmed: false,
+            name: "Unknown Logo",
+            confidence: 0
+        };
+    }
+}
+
+/**
+ * Crop an image region from base64 using canvas
+ * Returns base64 string without data URL prefix
+ */
+async function cropImageRegion(
+    base64: string,
+    mimeType: string,
+    bbox: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+    console.log("Step 2 (Crop): Cropping region", bbox);
+    
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        
+        img.onload = () => {
+            try {
+                // Create canvas for the cropped region
+                const canvas = document.createElement('canvas');
+                canvas.width = bbox.width;
+                canvas.height = bbox.height;
+                const ctx = canvas.getContext('2d');
+                
+                if (!ctx) {
+                    reject(new Error('Could not get canvas context'));
+                    return;
+                }
+
+                // Draw only the bounding box region onto the canvas
+                ctx.drawImage(
+                    img,
+                    bbox.x, bbox.y, bbox.width, bbox.height,  // Source rectangle (from original image)
+                    0, 0, bbox.width, bbox.height             // Destination rectangle (to canvas)
+                );
+
+                // Export the cropped region as base64 (same mime type)
+                const dataUrl = canvas.toDataURL(mimeType);
+                
+                // Return base64 string without data URL prefix
+                const base64String = dataUrl.includes(',') 
+                    ? dataUrl.split(',')[1] 
+                    : dataUrl;
+                
+                resolve(base64String);
+            } catch (error) {
+                reject(error);
+            }
+        };
+        
+        img.onerror = () => {
+            reject(new Error('Failed to load image for cropping'));
+        };
+        
+        // Handle base64 with or without data URL prefix
+        if (base64.startsWith('data:')) {
+            img.src = base64;
+        } else {
+            img.src = `data:${mimeType};base64,${base64}`;
+        }
+    });
+}
+
+/**
+ * Crop an image from base64 using canvas (legacy function, kept for backward compatibility)
+ * Returns base64 with data URL prefix
+ */
+function cropImageFromBase64(
+    imageBase64: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            // Create canvas and crop
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            if (!ctx) {
+                reject(new Error('Could not get canvas context'));
+                return;
+            }
+
+            // Draw the cropped portion
+            ctx.drawImage(
+                img,
+                x, y, width, height,  // Source rectangle
+                0, 0, width, height   // Destination rectangle
+            );
+
+            // Convert to base64 PNG
+            const croppedBase64 = canvas.toDataURL('image/png');
+            resolve(croppedBase64);
+        };
+        img.onerror = reject;
+        img.src = imageBase64;
+    });
 }

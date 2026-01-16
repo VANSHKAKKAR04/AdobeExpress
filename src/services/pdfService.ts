@@ -309,6 +309,66 @@ export async function generateBrandGuidelinesPDF(brandKit: BrandKit, fileName: s
         doc.text("Logo Usage & Variations", margin, yPos);
         yPos += 6;
         
+        // Add logo images if available
+        if (brandKit.logos.full && brandKit.logos.full.startsWith('data:image')) {
+            try {
+                // Get all logos (either from allLogos array or just the single full logo)
+                const allLogos = (brandKit.logos as any).allLogos || [{ image: brandKit.logos.full }];
+                
+                doc.setFontSize(10);
+                doc.setFont("helvetica", "normal");
+                doc.text(`Logo Image${allLogos.length > 1 ? 's' : ''}:`, margin + 5, yPos);
+                yPos += 8;
+                
+                // Add each logo
+                for (let i = 0; i < allLogos.length; i++) {
+                    const logo = allLogos[i];
+                    const logoDataUrl = typeof logo === 'string' ? logo : logo.image;
+                    
+                    // Load image to get dimensions
+                    const imgDimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => resolve({ width: img.width, height: img.height });
+                        img.onerror = reject;
+                        img.src = logoDataUrl;
+                    });
+                    
+                    // Calculate logo size (max 80px width, maintain aspect ratio)
+                    const maxLogoWidth = 80;
+                    const maxLogoHeight = 80;
+                    const logoAspectRatio = imgDimensions.width / imgDimensions.height;
+                    let logoWidth = maxLogoWidth;
+                    let logoHeight = maxLogoWidth / logoAspectRatio;
+                    
+                    if (logoHeight > maxLogoHeight) {
+                        logoHeight = maxLogoHeight;
+                        logoWidth = maxLogoHeight * logoAspectRatio;
+                    }
+                    
+                    // Check if we need a new page
+                    if (yPos + logoHeight + 15 > pageHeight - 20) {
+                        doc.addPage();
+                        yPos = margin;
+                    }
+                    
+                    // Add logo description if available
+                    if (typeof logo !== 'string' && logo.description) {
+                        doc.setFontSize(9);
+                        doc.setFont("helvetica", "italic");
+                        doc.text(logo.description, margin + 5, yPos);
+                        yPos += 6;
+                    }
+                    
+                    // Add image to PDF
+                    doc.addImage(logoDataUrl, 'PNG', margin + 5, yPos, logoWidth, logoHeight);
+                    yPos += logoHeight + (i < allLogos.length - 1 ? 8 : 10); // Add spacing between logos
+                }
+            } catch (error) {
+                console.warn("Could not add logo images to PDF:", error);
+                // Continue without logo images
+            }
+        }
+        
         doc.setFontSize(10);
         doc.setFont("helvetica", "normal");
         

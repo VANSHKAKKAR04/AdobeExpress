@@ -16,6 +16,7 @@ import { transformToBrandKit, generateComprehensiveBrandKit } from "../../servic
 import { generateBrandGuidelinesPDF } from "../../services/pdfService";
 import { convertToAllPlatforms, PLATFORM_SPECS } from "../../services/platformConverterService";
 import { generatePlatformPDF, generatePlatformImage, downloadBlob } from "../../services/platformDownloadService";
+import { getSavedBrandKits, saveBrandKit, deleteSavedBrandKit, SavedBrandKit } from "../../services/brandKitStorageService";
 import "./App.css";
 
 import { AddOnSDKAPI } from "https://new.express.adobe.com/static/add-on-sdk/sdk.js";
@@ -43,6 +44,34 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     const [showCommunicationStyle, setShowCommunicationStyle] = useState<boolean>(false);
     const [showExportPanel, setShowExportPanel] = useState<boolean>(false);
     const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
+    const [showSavedKitsModal, setShowSavedKitsModal] = useState<boolean>(false);
+    const [savedBrandKits, setSavedBrandKits] = useState<SavedBrandKit[]>([]);
+    const [isLoadingSavedKit, setIsLoadingSavedKit] = useState<boolean>(false);
+    const [isViewingSavedKit, setIsViewingSavedKit] = useState<boolean>(false);
+    const [showSaveModal, setShowSaveModal] = useState<boolean>(false);
+    const [saveKitName, setSaveKitName] = useState<string>("");
+    const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
+    
+    // PDF selection state
+    const [selectedForPDF, setSelectedForPDF] = useState<{
+        colors: string[]; // Array of hex colors
+        typography: number[]; // Array of typography indices
+        spacing: boolean;
+        logos: boolean;
+        graphics: boolean;
+        contrastRules: boolean;
+        communicationStyle: boolean;
+        tone: boolean;
+    }>({
+        colors: [],
+        typography: [],
+        spacing: true,
+        logos: true,
+        graphics: true,
+        contrastRules: true,
+        communicationStyle: false,
+        tone: true,
+    });
     const [janusProgress, setJanusProgress] = useState<string>("");
     const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
     
@@ -75,6 +104,11 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         });
     }, []);
 
+    // Load saved brand kits on mount
+    useEffect(() => {
+        setSavedBrandKits(getSavedBrandKits());
+    }, []);
+
     const handleFileSelect = async (file: File) => {
         setState("uploading");
         setError(null);
@@ -94,12 +128,15 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
             console.log("✅ Extraction complete:", extractionResult);
             
             // Transform to structured brand kit
+            // Transform to structured brand kit
             const transformedBrandKit = transformToBrandKit(extractionResult);
+
             console.log("✅ Brand kit transformed:", transformedBrandKit);
-            
+
             // Generate comprehensive brand kit with Janus (logos, characters, patterns, imagery)
             console.log("🎨 Generating comprehensive brand kit with Janus...");
             setState("analyzing"); // Keep in analyzing state to show progress
+
             const comprehensiveBrandKit = await generateComprehensiveBrandKit(transformedBrandKit, {
                 generateLogos: true,
                 generateCharacters: true,
@@ -113,11 +150,36 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     setJanusProgress(progress);
                 },
             });
-            
+
             console.log("✅ Comprehensive brand kit generated:", comprehensiveBrandKit);
+
+            // Finalize state using the comprehensive kit
             setBrandKit(comprehensiveBrandKit);
+            setIsViewingSavedKit(false); // Mark as newly generated
             setJanusProgress("");
+
+            // Initialize PDF selections – select all by default
+            const allColors = [
+                ...comprehensiveBrandKit.colors.primary.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.secondary.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.accent.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.neutral.map(c => c.hex),
+            ];
+            const allTypographyIndices = comprehensiveBrandKit.typography.map((_, i) => i);
+
+            setSelectedForPDF({
+                colors: allColors,
+                typography: allTypographyIndices,
+                spacing: true,
+                logos: true,
+                graphics: true,
+                contrastRules: true,
+                communicationStyle: false,
+                tone: true,
+            });
+
             setState("ready");
+
             
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to extract brand kit");
@@ -168,34 +230,62 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
             setState("error");
             return;
         }
-
+        
         if (format === "pdf") {
             try {
                 setState("exporting");
                 setShowExportPanel(false);
                 setError(null);
 
-                const pdfBlob = await generateBrandGuidelinesPDF(brandKit);
+                // Create filtered brand kit based on selections
+                const filteredBrandKit: BrandKit = {
+                    colors: {
+                        primary: brandKit.colors.primary.filter(c => selectedForPDF.colors.includes(c.hex)),
+                        secondary: brandKit.colors.secondary.filter(c => selectedForPDF.colors.includes(c.hex)),
+                        accent: brandKit.colors.accent.filter(c => selectedForPDF.colors.includes(c.hex)),
+                        neutral: brandKit.colors.neutral.filter(c => selectedForPDF.colors.includes(c.hex)),
+                    },
+                    typography: brandKit.typography.filter((_, i) => selectedForPDF.typography.includes(i)),
+                    logos: selectedForPDF.logos ? brandKit.logos : {
+                        full: '',
+                        icon: undefined,
+                        monochrome: undefined,
+                        inverted: undefined,
+                        styles: undefined,
+                    },
+                    spacing: selectedForPDF.spacing ? brandKit.spacing : {
+                        baseUnit: 8,
+                        sectionGap: 32,
+                        paragraphGap: 16,
+                        elementPadding: 16,
+                    },
+                    graphics: selectedForPDF.graphics ? brandKit.graphics : undefined,
+                    contrastRules: selectedForPDF.contrastRules ? brandKit.contrastRules : undefined,
+                    communicationStyle: selectedForPDF.communicationStyle ? brandKit.communicationStyle : undefined,
+                    tone: selectedForPDF.tone ? brandKit.tone : undefined,
+                };
+
+                const pdfBlob = await generateBrandGuidelinesPDF(filteredBrandKit);
 
                 if (!pdfBlob || pdfBlob.size === 0) {
                     throw new Error("PDF generation failed - empty file");
                 }
 
                 // Convert blob to data URL for copyable link
-                const dataUrl = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result as string);
-                    reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
-                    reader.readAsDataURL(pdfBlob);
-                });
-
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
+                reader.readAsDataURL(pdfBlob);
+            });
+            
                 // Store the link for user to copy
                 setPdfDownloadLink(dataUrl);
                 setState("ready");
-            } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
+        } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
                 setError(errorMsg);
-                setState("error");
+            setState("error");
             }
         } else if (format === "json") {
             // Future: JSON export
@@ -224,6 +314,112 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         setDownloadLinks({});
         setShowExportPanel(false);
         setPdfDownloadLink(null);
+        setIsViewingSavedKit(false);
+        setSaveSuccessMessage(null);
+        setSelectedForPDF({
+            colors: [],
+            typography: [],
+            spacing: true,
+            logos: true,
+            graphics: true,
+            contrastRules: true,
+            communicationStyle: false,
+            tone: true,
+        });
+    };
+
+    /**
+     * Save current brand kit
+     */
+    const handleSaveBrandKit = () => {
+        if (!brandKit) {
+            setError("No brand kit to save");
+            return;
+        }
+
+        // Set default name and show modal
+        setSaveKitName(`Brand Kit ${new Date().toLocaleDateString()}`);
+        setShowSaveModal(true);
+    };
+
+    /**
+     * Confirm save brand kit (called from modal)
+     */
+    const handleConfirmSave = () => {
+        if (!brandKit) {
+            return;
+        }
+
+        const name = saveKitName.trim();
+        if (!name || name === "") {
+            setError("Please enter a name for the brand kit");
+            return;
+        }
+
+        const result = saveBrandKit(brandKit, name, uploadedFileName || undefined);
+        if (result.success) {
+            setSavedBrandKits(getSavedBrandKits());
+            setShowSaveModal(false);
+            setSaveKitName("");
+            setError(null);
+            setSaveSuccessMessage("✅ Brand kit saved successfully!");
+            setTimeout(() => setSaveSuccessMessage(null), 3000);
+        } else {
+            setError(result.error || "Failed to save brand kit");
+        }
+    };
+
+    /**
+     * Load a saved brand kit
+     */
+    const handleLoadSavedBrandKit = (savedKit: SavedBrandKit) => {
+        setIsLoadingSavedKit(true);
+        setShowSavedKitsModal(false);
+        setError(null);
+        setIsViewingSavedKit(true); // Mark as viewing saved kit
+        
+        // Set the brand kit
+        setBrandKit(savedKit.brandKit);
+        setUploadedFileName(savedKit.sourceFileName || null);
+        
+        // Initialize PDF selections
+        const allColors = [
+            ...savedKit.brandKit.colors.primary.map(c => c.hex),
+            ...savedKit.brandKit.colors.secondary.map(c => c.hex),
+            ...savedKit.brandKit.colors.accent.map(c => c.hex),
+            ...savedKit.brandKit.colors.neutral.map(c => c.hex),
+        ];
+        const allTypographyIndices = savedKit.brandKit.typography.map((_, i) => i);
+        
+        setSelectedForPDF({
+            colors: allColors,
+            typography: allTypographyIndices,
+            spacing: true,
+            logos: true,
+            graphics: true,
+            contrastRules: true,
+            communicationStyle: false,
+            tone: true,
+        });
+        
+        setState("ready");
+        setIsLoadingSavedKit(false);
+    };
+
+    /**
+     * Delete a saved brand kit
+     */
+    const handleDeleteSavedBrandKit = (id: string, name: string) => {
+        if (!confirm(`Are you sure you want to delete "${name}"?`)) {
+            return;
+        }
+
+        const result = deleteSavedBrandKit(id);
+        if (result.success) {
+            setSavedBrandKits(getSavedBrandKits());
+        } else {
+            setError(result.error || "Failed to delete brand kit");
+        }
     };
 
     // Convert file to base64
@@ -299,9 +495,21 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     return (
         <Theme system="express" scale="medium" color="light">
             <div className="container">
-                <h2 style={{ marginTop: 0, marginBottom: "16px", fontSize: "18px", fontWeight: "bold" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                    <h2 style={{ marginTop: 0, marginBottom: 0, fontSize: "18px", fontWeight: "bold" }}>
                     Auto Brand Kit Rebuilder
                 </h2>
+                    <Button 
+                        size="s" 
+                        variant="secondary" 
+                        onClick={() => {
+                            setSavedBrandKits(getSavedBrandKits());
+                            setShowSavedKitsModal(true);
+                        }}
+                    >
+                        📚 Saved ({savedBrandKits.length})
+                    </Button>
+                </div>
                 <p style={{ marginBottom: "16px", fontSize: "12px", color: "#666" }}>
                     Upload a screenshot, app UI, or PDF to extract brand colors, typography, and design elements.
                 </p>
@@ -357,6 +565,21 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     </div>
                 )}
 
+                {saveSuccessMessage && (
+                    <div style={{
+                        marginBottom: "16px",
+                        padding: "12px",
+                        backgroundColor: "#e8f5e9",
+                        borderRadius: "8px",
+                        border: "1px solid #4caf50",
+                        color: "#2e7d32",
+                        fontSize: "12px",
+                        fontWeight: "bold",
+                    }}>
+                        {saveSuccessMessage}
+                    </div>
+                )}
+
                 {state === "error" && (
                     <div>
                         <p style={{ color: "#d32f2f", marginBottom: "16px" }}>
@@ -397,11 +620,29 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                           brandKit.colors.accent.length > 0) && (
                             <div style={{ marginBottom: "16px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
-                                    Colors:
+                                    Colors: <span style={{ fontSize: "10px", fontWeight: "normal", color: "#666" }}>(Select for PDF)</span>
                                 </p>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                                     {brandKit.colors.primary.map((color, i) => (
-                                        <div key={`primary-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                        <label key={`primary-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedForPDF.colors.includes(color.hex)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: [...selectedForPDF.colors, color.hex]
+                                                        });
+                                                    } else {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: selectedForPDF.colors.filter(c => c !== color.hex)
+                                                        });
+                                                    }
+                                                }}
+                                                style={{ cursor: "pointer" }}
+                                            />
                                             <div 
                                                 style={{ 
                                                     width: "24px", 
@@ -412,10 +653,28 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                                 }}
                                             />
                                             <span style={{ fontSize: "11px" }}>{color.hex}</span>
-                                        </div>
+                                        </label>
                                     ))}
                                     {brandKit.colors.secondary.map((color, i) => (
-                                        <div key={`secondary-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                        <label key={`secondary-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedForPDF.colors.includes(color.hex)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: [...selectedForPDF.colors, color.hex]
+                                                        });
+                                                    } else {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: selectedForPDF.colors.filter(c => c !== color.hex)
+                                                        });
+                                                    }
+                                                }}
+                                                style={{ cursor: "pointer" }}
+                                            />
                                             <div 
                                                 style={{ 
                                                     width: "24px", 
@@ -426,10 +685,28 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                                 }}
                                             />
                                             <span style={{ fontSize: "11px" }}>{color.hex}</span>
-                                        </div>
+                                        </label>
                                     ))}
                                     {brandKit.colors.accent.map((color, i) => (
-                                        <div key={`accent-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                        <label key={`accent-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedForPDF.colors.includes(color.hex)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: [...selectedForPDF.colors, color.hex]
+                                                        });
+                                                    } else {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: selectedForPDF.colors.filter(c => c !== color.hex)
+                                                        });
+                                                    }
+                                                }}
+                                                style={{ cursor: "pointer" }}
+                                            />
                                             <div 
                                                 style={{ 
                                                     width: "24px", 
@@ -440,7 +717,39 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                                 }}
                                             />
                                             <span style={{ fontSize: "11px" }}>{color.hex}</span>
-                                        </div>
+                                        </label>
+                                    ))}
+                                    {brandKit.colors.neutral.map((color, i) => (
+                                        <label key={`neutral-${i}`} style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "pointer" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedForPDF.colors.includes(color.hex)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: [...selectedForPDF.colors, color.hex]
+                                                        });
+                                                    } else {
+                                                        setSelectedForPDF({
+                                                            ...selectedForPDF,
+                                                            colors: selectedForPDF.colors.filter(c => c !== color.hex)
+                                                        });
+                                                    }
+                                                }}
+                                                style={{ cursor: "pointer" }}
+                                            />
+                                            <div 
+                                                style={{ 
+                                                    width: "24px", 
+                                                    height: "24px", 
+                                                    backgroundColor: color.hex,
+                                                    borderRadius: "4px",
+                                                    border: "1px solid #ddd"
+                                                }}
+                                            />
+                                            <span style={{ fontSize: "11px" }}>{color.hex}</span>
+                                        </label>
                                     ))}
                                 </div>
                             </div>
@@ -450,12 +759,30 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         {brandKit.typography.length > 0 && (
                             <div style={{ marginBottom: "16px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
-                                    Typography:
+                                    Typography: <span style={{ fontSize: "10px", fontWeight: "normal", color: "#666" }}>(Select for PDF)</span>
                                 </p>
                                 {brandKit.typography.map((typo, i) => (
-                                    <div key={i} style={{ fontSize: "11px", marginBottom: "4px" }}>
-                                        {typo.role}: {typo.fontFamily} ({typo.fontWeight})
-                                    </div>
+                                    <label key={i} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", marginBottom: "4px", cursor: "pointer" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForPDF.typography.includes(i)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedForPDF({
+                                                        ...selectedForPDF,
+                                                        typography: [...selectedForPDF.typography, i]
+                                                    });
+                                                } else {
+                                                    setSelectedForPDF({
+                                                        ...selectedForPDF,
+                                                        typography: selectedForPDF.typography.filter(idx => idx !== i)
+                                                    });
+                                                }
+                                            }}
+                                            style={{ cursor: "pointer" }}
+                                        />
+                                        <span>{typo.role}: {typo.fontFamily} ({typo.fontWeight})</span>
+                                    </label>
                                 ))}
                             </div>
                         )}
@@ -463,9 +790,63 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         {/* Logo Variations & Styles Preview */}
                         {(brandKit.logos.styles || brandKit.logos.full || brandKit.logos.icon) && (
                             <div style={{ marginBottom: "16px" }}>
-                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
-                                    Logo Variations & Styles:
-                                </p>
+                                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", marginBottom: "8px", cursor: "pointer" }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedForPDF.logos}
+                                        onChange={(e) => setSelectedForPDF({ ...selectedForPDF, logos: e.target.checked })}
+                                        style={{ cursor: "pointer" }}
+                                    />
+                                    <span>Logo Variations & Styles:</span>
+                                    <span style={{ fontSize: "10px", fontWeight: "normal", color: "#666" }}>(Select for PDF)</span>
+                                </label>
+                                
+                                {/* Display extracted logo images if available */}
+                                {brandKit.logos.full && brandKit.logos.full.startsWith('data:image') && (
+                                    <div style={{ marginBottom: "8px" }}>
+                                        <p style={{ fontSize: "11px", fontWeight: "bold", marginBottom: "4px" }}>
+                                            Extracted Logo{((brandKit.logos as any).allLogos?.length || 1) > 1 ? 's' : ''}:
+                                        </p>
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                            {((brandKit.logos as any).allLogos || [brandKit.logos.full]).map((logo: any, idx: number) => (
+                                                <div key={idx} style={{ padding: "8px", backgroundColor: "#f9f9f9", borderRadius: "4px", border: "1px solid #e0e0e0" }}>
+                                                    {typeof logo === 'string' ? (
+                                                        <img 
+                                                            src={logo} 
+                                                            alt={`Brand Logo ${idx + 1}`} 
+                                                            style={{ 
+                                                                maxWidth: "150px", 
+                                                                maxHeight: "80px", 
+                                                                border: "1px solid #ddd",
+                                                                borderRadius: "4px",
+                                                                backgroundColor: "white"
+                                                            }} 
+                                                        />
+                                                    ) : (
+                                                        <>
+                                                            {logo.description && (
+                                                                <p style={{ fontSize: "10px", color: "#666", marginBottom: "4px" }}>
+                                                                    {logo.description}
+                                                                </p>
+                                                            )}
+                                                            <img 
+                                                                src={logo.image} 
+                                                                alt={logo.description || `Logo ${idx + 1}`} 
+                                                                style={{ 
+                                                                    maxWidth: "150px", 
+                                                                    maxHeight: "80px", 
+                                                                    border: "1px solid #ddd",
+                                                                    borderRadius: "4px",
+                                                                    backgroundColor: "white"
+                                                                }} 
+                                                            />
+                                                        </>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 {brandKit.logos.styles && (
                                     <div style={{ fontSize: "11px", marginBottom: "4px" }}>
                                         {brandKit.logos.styles.clearSpace && (
@@ -1141,11 +1522,97 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         </div>
                         }
 
+                        {/* PDF Selection Options */}
+                        <div style={{
+                            marginTop: "16px",
+                            padding: "12px",
+                            backgroundColor: "#f9f9f9",
+                            borderRadius: "8px",
+                            border: "1px solid #e0e0e0"
+                        }}>
+                            <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                📄 PDF Content Selection:
+                            </p>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "11px" }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedForPDF.tone}
+                                        onChange={(e) => setSelectedForPDF({ ...selectedForPDF, tone: e.target.checked })}
+                                        style={{ cursor: "pointer" }}
+                                    />
+                                    <span>Brand Tone</span>
+                                </label>
+                                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedForPDF.spacing}
+                                        onChange={(e) => setSelectedForPDF({ ...selectedForPDF, spacing: e.target.checked })}
+                                        style={{ cursor: "pointer" }}
+                                    />
+                                    <span>Spacing System</span>
+                                </label>
+                                {(brandKit.logos.styles || brandKit.logos.full || brandKit.logos.icon) && (
+                                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForPDF.logos}
+                                            onChange={(e) => setSelectedForPDF({ ...selectedForPDF, logos: e.target.checked })}
+                                            style={{ cursor: "pointer" }}
+                                        />
+                                        <span>Logo Usage & Variations</span>
+                                    </label>
+                                )}
+                                {brandKit.graphics && (
+                                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForPDF.graphics}
+                                            onChange={(e) => setSelectedForPDF({ ...selectedForPDF, graphics: e.target.checked })}
+                                            style={{ cursor: "pointer" }}
+                                        />
+                                        <span>Icons & Graphics</span>
+                                    </label>
+                                )}
+                                {brandKit.contrastRules && brandKit.contrastRules.length > 0 && (
+                                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForPDF.contrastRules}
+                                            onChange={(e) => setSelectedForPDF({ ...selectedForPDF, contrastRules: e.target.checked })}
+                                            style={{ cursor: "pointer" }}
+                                        />
+                                        <span>Contrast Rules</span>
+                                    </label>
+                                )}
+                                {brandKit.communicationStyle && (
+                                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedForPDF.communicationStyle}
+                                            onChange={(e) => setSelectedForPDF({ ...selectedForPDF, communicationStyle: e.target.checked })}
+                                            style={{ cursor: "pointer" }}
+                                        />
+                                        <span>Communication Style (Inferred)</span>
+                                    </label>
+                                )}
+                            </div>
+                        </div>
+
                         {/* Actions */}
                         <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
                             <Button size="m" onClick={handleApplyBrandKit}>
                                 Apply Brand Kit to Document
                             </Button>
+                            {!isViewingSavedKit && (
+                            <Button 
+                                size="m" 
+                                variant="secondary" 
+                                    onClick={handleSaveBrandKit}
+                            >
+                                    💾 Save Brand Kit
+                            </Button>
+                            )}
                             
                             {/* Export Panel */}
                             {showExportPanel && (
@@ -1307,6 +1774,190 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         <p style={{ fontSize: "11px", color: "#999", marginTop: "4px" }}>
                             This may take 30-60 seconds...
                         </p>
+                    </div>
+                )}
+
+                {/* Save Brand Kit Modal */}
+                {showSaveModal && (
+                    <div style={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: "rgba(0, 0, 0, 0.5)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 10000,
+                    }} onClick={() => {
+                        setShowSaveModal(false);
+                        setSaveKitName("");
+                    }}>
+                        <div style={{
+                            backgroundColor: "white",
+                            borderRadius: "8px",
+                            padding: "20px",
+                            maxWidth: "400px",
+                            width: "90%",
+                            boxShadow: "0 8px 16px rgba(0,0,0,0.2)",
+                        }} onClick={(e) => e.stopPropagation()}>
+                            <h3 style={{ margin: "0 0 16px 0", fontSize: "16px", fontWeight: "bold" }}>
+                                💾 Save Brand Kit
+                            </h3>
+                            <p style={{ fontSize: "12px", color: "#666", marginBottom: "12px" }}>
+                                Enter a name for this brand kit:
+                            </p>
+                            <input
+                                type="text"
+                                value={saveKitName}
+                                onChange={(e) => setSaveKitName(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        handleConfirmSave();
+                                    } else if (e.key === "Escape") {
+                                        setShowSaveModal(false);
+                                        setSaveKitName("");
+                                    }
+                                }}
+                                autoFocus
+                                style={{
+                                    width: "100%",
+                                    padding: "8px",
+                                    fontSize: "12px",
+                                    border: "1px solid #ccc",
+                                    borderRadius: "4px",
+                                    marginBottom: "16px",
+                                    boxSizing: "border-box",
+                                }}
+                                placeholder="Brand Kit Name"
+                            />
+                            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                                <Button
+                                    size="s"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setShowSaveModal(false);
+                                        setSaveKitName("");
+                                    }}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    size="s"
+                                    variant="primary"
+                                    onClick={handleConfirmSave}
+                                    disabled={!saveKitName.trim()}
+                                >
+                                    Save
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Saved Brand Kits Modal */}
+                {showSavedKitsModal && (
+                    <div style={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: "rgba(0, 0, 0, 0.5)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 10000,
+                    }} onClick={() => setShowSavedKitsModal(false)}>
+                        <div style={{
+                            backgroundColor: "white",
+                            borderRadius: "8px",
+                            padding: "20px",
+                            maxWidth: "600px",
+                            width: "90%",
+                            maxHeight: "80vh",
+                            overflowY: "auto",
+                            boxShadow: "0 8px 16px rgba(0,0,0,0.2)",
+                        }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "bold" }}>
+                                    📚 Saved Brand Kits ({savedBrandKits.length})
+                                </h3>
+                                <button
+                                    onClick={() => setShowSavedKitsModal(false)}
+                                    style={{
+                                        background: "none",
+                                        border: "none",
+                                        fontSize: "20px",
+                                        cursor: "pointer",
+                                        padding: "0",
+                                        width: "24px",
+                                        height: "24px",
+                                    }}
+                                >
+                                    ×
+                                </button>
+                            </div>
+
+                            {savedBrandKits.length === 0 ? (
+                                <p style={{ fontSize: "12px", color: "#666", textAlign: "center", padding: "20px" }}>
+                                    No saved brand kits yet. Generate and save a brand kit to see it here.
+                                </p>
+                            ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                    {savedBrandKits.map((savedKit) => (
+                                        <div
+                                            key={savedKit.id}
+                                            style={{
+                                                padding: "12px",
+                                                border: "1px solid #e0e0e0",
+                                                borderRadius: "8px",
+                                                backgroundColor: "#f9f9f9",
+                                            }}
+                                        >
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                                                <div style={{ flex: 1 }}>
+                                                    <p style={{ fontSize: "13px", fontWeight: "bold", margin: "0 0 4px 0" }}>
+                                                        {savedKit.name}
+                                                    </p>
+                                                    <p style={{ fontSize: "11px", color: "#666", margin: "0 0 4px 0" }}>
+                                                        Saved: {new Date(savedKit.createdAt).toLocaleString()}
+                                                    </p>
+                                                    {savedKit.sourceFileName && (
+                                                        <p style={{ fontSize: "11px", color: "#999", margin: 0 }}>
+                                                            Source: {savedKit.sourceFileName}
+                                                        </p>
+                                                    )}
+                                                    <div style={{ fontSize: "11px", color: "#666", marginTop: "8px" }}>
+                                                        <span>Colors: {savedKit.brandKit.colors.primary.length + savedKit.brandKit.colors.secondary.length + savedKit.brandKit.colors.accent.length}</span>
+                                                        {" | "}
+                                                        <span>Typography: {savedKit.brandKit.typography.length}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                                                <Button
+                                                    size="s"
+                                                    variant="primary"
+                                                    onClick={() => handleLoadSavedBrandKit(savedKit)}
+                                                    disabled={isLoadingSavedKit}
+                                                >
+                                                    {isLoadingSavedKit ? "Loading..." : "📂 Open"}
+                                                </Button>
+                                                <Button
+                                                    size="s"
+                                                    variant="secondary"
+                                                    onClick={() => handleDeleteSavedBrandKit(savedKit.id, savedKit.name)}
+                                                >
+                                                    🗑️ Delete
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
