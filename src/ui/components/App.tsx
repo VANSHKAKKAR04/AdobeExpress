@@ -20,7 +20,8 @@ import "./App.css";
 
 import { AddOnSDKAPI } from "https://new.express.adobe.com/static/add-on-sdk/sdk.js";
 
-type ProcessingState = "idle" | "uploading" | "analyzing" | "ready" | "applying" | "converting" | "error";
+type ProcessingState = "idle" | "uploading" | "analyzing" | "ready" | "applying" | "converting" | "error" | "exporting";
+type ExportFormat = "pdf" | "json" | "zip";
 
 const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxProxy: DocumentSandboxApi }) => {
     const [state, setState] = useState<ProcessingState>("idle");
@@ -29,6 +30,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
     const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
     const [apiStatus, setApiStatus] = useState<{ checked: boolean; working: boolean; message?: string }>({ checked: false, working: false });
     const [showCommunicationStyle, setShowCommunicationStyle] = useState<boolean>(false);
+    const [showExportPanel, setShowExportPanel] = useState<boolean>(false);
+    const [pdfDownloadLink, setPdfDownloadLink] = useState<string | null>(null);
     
     // Multi-platform converter state
     const [rawDesignFile, setRawDesignFile] = useState<File | null>(null);
@@ -95,170 +98,52 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         }
     };
 
-    const handleDownloadPDF = async () => {
-        console.log("Download button clicked!");
-        console.log("Current brandKit:", brandKit);
-        console.log("Current state:", state);
-        
+    /**
+     * Export brand kit in the specified format
+     */
+    const handleExportBrandKit = async (format: ExportFormat) => {
         if (!brandKit) {
-            console.error("No brand kit available for PDF generation");
             setError("No brand kit available. Please extract a brand kit first.");
             setState("error");
             return;
         }
-        
-        try {
-            console.log("Starting PDF generation with brand kit:", brandKit);
-            
-            // Show feedback immediately
-            const originalState = state;
-            setState("applying");
-            
-            console.log("Calling generateBrandGuidelinesPDF...");
-            const pdfBlob = await generateBrandGuidelinesPDF(brandKit);
-            console.log("PDF generated successfully, blob:", pdfBlob);
-            console.log("PDF blob size:", pdfBlob?.size, "bytes");
-            console.log("PDF blob type:", pdfBlob?.type);
-            
-            if (!pdfBlob) {
-                throw new Error("PDF generation returned null/undefined");
+
+        if (format === "pdf") {
+            try {
+                setState("exporting");
+                setShowExportPanel(false);
+                setError(null);
+
+                const pdfBlob = await generateBrandGuidelinesPDF(brandKit);
+
+                if (!pdfBlob || pdfBlob.size === 0) {
+                    throw new Error("PDF generation failed - empty file");
+                }
+
+                // Convert blob to data URL for copyable link
+                const dataUrl = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
+                    reader.readAsDataURL(pdfBlob);
+                });
+
+                // Store the link for user to copy
+                setPdfDownloadLink(dataUrl);
+                setState("ready");
+            } catch (err) {
+                const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
+                setError(errorMsg);
+                setState("error");
             }
-            
-            if (pdfBlob.size === 0) {
-                throw new Error("PDF generation failed - empty blob (0 bytes)");
-            }
-            
-            // Convert blob to data URL for more reliable opening in sandboxed iframes
-            console.log("Converting PDF blob to data URL...");
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = () => reject(new Error("Failed to convert PDF to data URL"));
-                reader.readAsDataURL(pdfBlob);
-            });
-            
-            console.log("Data URL created, length:", dataUrl.length);
-            
-            // Open PDF in new window - user can download from browser's PDF viewer
-            console.log("Opening PDF in new window...");
-            const newWindow = window.open(dataUrl, "_blank");
-            
-            if (newWindow) {
-                console.log("PDF opened successfully in new window - user can download from browser");
-                setState(originalState);
-            } else {
-                console.warn("Popup blocked - showing manual copy instructions");
-                // Since all automated methods are blocked, provide a manual copy solution
-                const linkContainer = document.createElement("div");
-                linkContainer.style.cssText = "position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid #0066cc; border-radius: 8px; z-index: 10000; box-shadow: 0 8px 16px rgba(0,0,0,0.2); max-width: 500px; max-height: 80vh; overflow-y: auto;";
-                
-                // Title
-                const title = document.createElement("div");
-                title.textContent = "📄 PDF Ready!";
-                title.style.cssText = "margin-bottom: 12px; font-weight: bold; color: #333; font-size: 16px;";
-                linkContainer.appendChild(title);
-                
-                // Instructions
-                const instructions = document.createElement("div");
-                instructions.innerHTML = `
-                    <div style="font-size: 12px; color: #666; margin-bottom: 12px; line-height: 1.5;">
-                        <strong>Due to security restrictions, please follow these steps:</strong><br><br>
-                        1. Select all text in the box below (Ctrl+A or Cmd+A)<br>
-                        2. Copy it (Ctrl+C or Cmd+C)<br>
-                        3. Open a new browser tab<br>
-                        4. Paste the link in the address bar and press Enter<br>
-                        5. The PDF will open and you can download it
-                    </div>
-                `;
-                linkContainer.appendChild(instructions);
-                
-                // Selectable textarea with the data URL
-                const textArea = document.createElement("textarea");
-                textArea.value = dataUrl;
-                textArea.readOnly = true;
-                textArea.style.cssText = "width: 100%; height: 120px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 11px; resize: vertical; margin-bottom: 12px; box-sizing: border-box;";
-                textArea.addEventListener("focus", () => {
-                    textArea.select();
-                });
-                textArea.addEventListener("click", () => {
-                    textArea.select();
-                });
-                linkContainer.appendChild(textArea);
-                
-                // Select all button
-                const selectButton = document.createElement("button");
-                selectButton.textContent = "📋 Select All Text";
-                selectButton.style.cssText = "margin-bottom: 8px; padding: 8px 12px; cursor: pointer; background: #0066cc; color: white; border: none; border-radius: 4px; width: 100%; font-size: 12px; font-weight: bold;";
-                selectButton.addEventListener("click", () => {
-                    textArea.focus();
-                    textArea.select();
-                    try {
-                        // Try to copy (may fail due to permissions, but selection will work)
-                        document.execCommand("copy");
-                        selectButton.textContent = "✓ Selected! (Copy with Ctrl+C)";
-                        selectButton.style.background = "#4caf50";
-                        setTimeout(() => {
-                            selectButton.textContent = "📋 Select All Text";
-                            selectButton.style.background = "#0066cc";
-                        }, 2000);
-                    } catch (e) {
-                        selectButton.textContent = "✓ Selected! (Copy with Ctrl+C)";
-                        selectButton.style.background = "#4caf50";
-                        setTimeout(() => {
-                            selectButton.textContent = "📋 Select All Text";
-                            selectButton.style.background = "#0066cc";
-                        }, 2000);
-                    }
-                });
-                linkContainer.appendChild(selectButton);
-                
-                // Alternative: Right-clickable link
-                const altInstructions = document.createElement("div");
-                altInstructions.style.cssText = "font-size: 11px; color: #666; margin-bottom: 8px; text-align: center;";
-                altInstructions.innerHTML = "Or right-click this link: ";
-                const directLink = document.createElement("a");
-                directLink.href = dataUrl;
-                directLink.textContent = "Open PDF Link";
-                directLink.style.cssText = "color: #0066cc; text-decoration: underline; cursor: pointer; margin-left: 4px;";
-                altInstructions.appendChild(directLink);
-                linkContainer.appendChild(altInstructions);
-                
-                // Close button
-                const closeButton = document.createElement("button");
-                closeButton.textContent = "Close";
-                closeButton.style.cssText = "margin-top: 8px; padding: 8px 12px; cursor: pointer; background: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; width: 100%; font-size: 12px;";
-                closeButton.addEventListener("click", () => {
-                    if (document.body.contains(linkContainer)) {
-                        document.body.removeChild(linkContainer);
-                    }
-                });
-                linkContainer.appendChild(closeButton);
-                
-                document.body.appendChild(linkContainer);
-                
-                // Auto-select text on open
-                setTimeout(() => {
-                    textArea.focus();
-                    textArea.select();
-                }, 100);
-                
-                // Auto-remove after 5 minutes
-                setTimeout(() => {
-                    if (document.body.contains(linkContainer)) {
-                        document.body.removeChild(linkContainer);
-                    }
-                }, 300000);
-                
-                setState(originalState);
-            }
-            
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : "Failed to generate PDF";
-            console.error("❌ Error generating PDF:", err);
-            console.error("Error stack:", err instanceof Error ? err.stack : "No stack trace");
-            setError(`Failed to generate PDF: ${errorMsg}. Check console (F12) for details.`);
+        } else if (format === "json") {
+            // Future: JSON export
+            setError("JSON export coming soon");
             setState("error");
-            alert(`Error: ${errorMsg}. Check console for details.`);
+        } else if (format === "zip") {
+            // Future: ZIP export
+            setError("ZIP export coming soon");
+            setState("error");
         }
     };
 
@@ -276,6 +161,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         setRawDesignFile(null);
         setPlatformResults(null);
         setDownloadLinks({});
+        setShowExportPanel(false);
+        setPdfDownloadLink(null);
     };
 
     // Convert file to base64
@@ -927,13 +814,133 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             <Button size="m" onClick={handleApplyBrandKit}>
                                 Apply Brand Kit to Document
                             </Button>
+                            
+                            {/* Export Panel */}
+                            {showExportPanel && (
+                                <div style={{
+                                    marginTop: "8px",
+                                    padding: "12px",
+                                    backgroundColor: "#f5f5f5",
+                                    borderRadius: "8px",
+                                    border: "1px solid #e0e0e0"
+                                }}>
+                                    <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                        Choose Export Format:
+                                    </p>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                        <div style={{ width: "100%" }}>
+                                            <Button
+                                                size="s"
+                                                variant="secondary"
+                                                onClick={() => handleExportBrandKit("pdf")}
+                                            >
+                                                Brand Guidelines (PDF)
+                                            </Button>
+                                        </div>
+                                        {/* Future formats can be added here */}
+                                        {/* <div style={{ width: "100%" }}>
+                                            <Button size="s" variant="secondary" onClick={() => handleExportBrandKit("json")}>
+                                                Brand Kit (JSON)
+                                            </Button>
+                                        </div>
+                                        <div style={{ width: "100%" }}>
+                                            <Button size="s" variant="secondary" onClick={() => handleExportBrandKit("zip")}>
+                                                Complete Package (ZIP)
+                                            </Button>
+                                        </div> */}
+                                    </div>
+                                    <div style={{ marginTop: "8px", width: "100%" }}>
+                                        <Button
+                                            size="s"
+                                            variant="secondary"
+                                            onClick={() => setShowExportPanel(false)}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* PDF Download Link Display */}
+                            {pdfDownloadLink && (
+                                <div style={{
+                                    marginTop: "12px",
+                                    padding: "12px",
+                                    backgroundColor: "#e8f5e9",
+                                    borderRadius: "8px",
+                                    border: "1px solid #4caf50"
+                                }}>
+                                    <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px", color: "#2e7d32" }}>
+                                        ✅ PDF Ready! Copy this link to download:
+                                    </p>
+                                    <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+                                        <input
+                                            type="text"
+                                            value={pdfDownloadLink}
+                                            readOnly
+                                            onClick={(e) => (e.target as HTMLInputElement).select()}
+                                            style={{
+                                                flex: 1,
+                                                padding: "8px",
+                                                fontSize: "11px",
+                                                border: "1px solid #ccc",
+                                                borderRadius: "4px",
+                                                fontFamily: "monospace",
+                                                backgroundColor: "white",
+                                                cursor: "text"
+                                            }}
+                                        />
+                                        <Button
+                                            size="s"
+                                            variant="secondary"
+                                            onClick={async () => {
+                                                try {
+                                                    await navigator.clipboard.writeText(pdfDownloadLink);
+                                                    alert("✅ Link copied! Paste it in a new browser tab to download the PDF.");
+                                                } catch (err) {
+                                                    // Fallback: select the input text
+                                                    const inputs = document.querySelectorAll('input[type="text"]');
+                                                    const pdfInput = Array.from(inputs).find((input: any) => 
+                                                        input.value === pdfDownloadLink
+                                                    ) as HTMLInputElement;
+                                                    if (pdfInput) {
+                                                        pdfInput.select();
+                                                        pdfInput.setSelectionRange(0, pdfDownloadLink.length);
+                                                        try {
+                                                            document.execCommand('copy');
+                                                            alert("✅ Link copied! Paste it in a new browser tab to download the PDF.");
+                                                        } catch (e) {
+                                                            alert("⚠️ Please manually select and copy the link (Ctrl+C or Cmd+C), then paste it in a new tab.");
+                                                        }
+                                                    }
+                                                }
+                                            }}
+                                        >
+                                            📋 Copy Link
+                                        </Button>
+                                    </div>
+                                    <p style={{ fontSize: "11px", color: "#666", marginTop: "4px" }}>
+                                        Paste this link in a new browser tab to open and download the PDF.
+                                    </p>
+                                    <Button
+                                        size="s"
+                                        variant="secondary"
+                                        onClick={() => setPdfDownloadLink(null)}
+                                        style={{ marginTop: "8px", width: "100%" }}
+                                    >
+                                        Close
+                                    </Button>
+                                </div>
+                            )}
+
                             <Button 
                                 size="m" 
                                 variant="secondary" 
-                                onClick={handleDownloadPDF}
+                                onClick={() => setShowExportPanel(!showExportPanel)}
                             >
-                                Download Guidelines PDF
+                                {showExportPanel ? "Hide Export Options" : "Download Brand Kit"}
                             </Button>
+                            
                             <Button size="m" variant="secondary" onClick={handleReset}>
                                 Start Over
                             </Button>
@@ -946,6 +953,15 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                         <p>Applying brand kit to document...</p>
                         <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
                             Creating color swatches and typography samples...
+                        </p>
+                    </div>
+                )}
+
+                {state === "exporting" && (
+                    <div>
+                        <p>Preparing your brand kit...</p>
+                        <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
+                            Generating export file...
                         </p>
                     </div>
                 )}
