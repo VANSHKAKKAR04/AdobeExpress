@@ -12,7 +12,7 @@ import { DocumentSandboxApi } from "../../models/DocumentSandboxApi";
 import { BrandKit } from "../../models/BrandKit";
 import { FileUpload } from "./FileUpload";
 import { extractBrandKitFromImage, checkMistralAPI } from "../../services/mistralService";
-import { transformToBrandKit } from "../../services/brandKitService";
+import { transformToBrandKit, generateComprehensiveBrandKit } from "../../services/brandKitService";
 import { generateBrandGuidelinesPDF } from "../../services/pdfService";
 import { convertToAllPlatforms, PLATFORM_SPECS } from "../../services/platformConverterService";
 import { generatePlatformPDF, generatePlatformImage, downloadBlob } from "../../services/platformDownloadService";
@@ -20,6 +20,17 @@ import { getSavedBrandKits, saveBrandKit, deleteSavedBrandKit, SavedBrandKit } f
 import "./App.css";
 
 import { AddOnSDKAPI } from "https://new.express.adobe.com/static/add-on-sdk/sdk.js";
+
+// Helper to convert base64 to Blob
+function base64ToBlob(base64: string, mimeType: string = 'image/png'): Blob {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
 
 type ProcessingState = "idle" | "uploading" | "analyzing" | "ready" | "applying" | "converting" | "error" | "exporting";
 type ExportFormat = "pdf" | "json" | "zip";
@@ -61,6 +72,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         communicationStyle: false,
         tone: true,
     });
+    const [janusProgress, setJanusProgress] = useState<string>("");
+    const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
     
     // Multi-platform converter state
     const [rawDesignFile, setRawDesignFile] = useState<File | null>(null);
@@ -100,27 +113,60 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         setState("uploading");
         setError(null);
         setUploadedFileName(file.name);
+        setJanusProgress("");
 
         try {
+            // Convert file to base64 for reference
+            const imageBase64 = await fileToBase64(file);
+            setReferenceImageBase64(imageBase64);
+            
             setState("analyzing");
             
             // Extract brand kit using Mistral API
+            console.log("🔍 Extracting brand kit from file with Mistral...");
             const extractionResult = await extractBrandKitFromImage(file);
+            console.log("✅ Extraction complete:", extractionResult);
             
             // Transform to structured brand kit
+            // Transform to structured brand kit
             const transformedBrandKit = transformToBrandKit(extractionResult);
-            setBrandKit(transformedBrandKit);
+
+            console.log("✅ Brand kit transformed:", transformedBrandKit);
+
+            // Generate comprehensive brand kit with Janus (logos, characters, patterns, imagery)
+            console.log("🎨 Generating comprehensive brand kit with Janus...");
+            setState("analyzing"); // Keep in analyzing state to show progress
+
+            const comprehensiveBrandKit = await generateComprehensiveBrandKit(transformedBrandKit, {
+                generateLogos: true,
+                generateCharacters: true,
+                generatePatterns: true,
+                generateImagery: true,
+                extractGraphics: true,
+                referenceImageBase64: imageBase64,
+                extractionResult: extractionResult, // Pass extraction result for visible_logos
+                onProgress: (progress) => {
+                    console.log("Janus Progress:", progress);
+                    setJanusProgress(progress);
+                },
+            });
+
+            console.log("✅ Comprehensive brand kit generated:", comprehensiveBrandKit);
+
+            // Finalize state using the comprehensive kit
+            setBrandKit(comprehensiveBrandKit);
             setIsViewingSavedKit(false); // Mark as newly generated
-            
-            // Initialize PDF selections - select all by default
+            setJanusProgress("");
+
+            // Initialize PDF selections – select all by default
             const allColors = [
-                ...transformedBrandKit.colors.primary.map(c => c.hex),
-                ...transformedBrandKit.colors.secondary.map(c => c.hex),
-                ...transformedBrandKit.colors.accent.map(c => c.hex),
-                ...transformedBrandKit.colors.neutral.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.primary.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.secondary.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.accent.map(c => c.hex),
+                ...comprehensiveBrandKit.colors.neutral.map(c => c.hex),
             ];
-            const allTypographyIndices = transformedBrandKit.typography.map((_, i) => i);
-            
+            const allTypographyIndices = comprehensiveBrandKit.typography.map((_, i) => i);
+
             setSelectedForPDF({
                 colors: allColors,
                 typography: allTypographyIndices,
@@ -131,12 +177,14 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                 communicationStyle: false,
                 tone: true,
             });
-            
+
             setState("ready");
+
             
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to extract brand kit");
             setState("error");
+            setJanusProgress("");
             console.error("Error extracting brand kit:", err);
         }
     };
@@ -146,6 +194,25 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
         
         setState("applying");
         try {
+            // First, add extracted graphics to the document if available
+            if (brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0) {
+                try {
+                    console.log(`Adding ${brandKit.graphics.extractedGraphics.length} extracted graphics to document...`);
+                    for (const graphic of brandKit.graphics.extractedGraphics) {
+                        const blob = base64ToBlob(graphic.imageBase64, 'image/png');
+                        await addOnUISdk.app.document.addImage(blob, {
+                            title: graphic.name,
+                            author: "Brand Kit Extractor"
+                        });
+                        console.log(`✅ Added ${graphic.name} to document`);
+                    }
+                } catch (graphicError) {
+                    console.warn("Could not add graphics to document:", graphicError);
+                    // Continue even if graphics can't be added
+                }
+            }
+            
+            // Apply brand kit to document
             await sandboxProxy.applyBrandKit(brandKit);
             setState("ready");
         } catch (err) {
@@ -481,8 +548,20 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     <div>
                         <p>🔍 Analyzing image with AI...</p>
                         <p style={{ fontSize: "12px", color: "#666", marginTop: "8px" }}>
-                            Extracting colors, typography, and design elements...
+                            {janusProgress || "Extracting colors, typography, and design elements..."}
                         </p>
+                        {janusProgress && (
+                            <div style={{ 
+                                marginTop: "12px", 
+                                padding: "8px", 
+                                backgroundColor: "#e3f2fd", 
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                                color: "#1976d2"
+                            }}>
+                                <strong>Janus Generation:</strong> {janusProgress}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -516,11 +595,21 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                     <div>
                         <div style={{ marginBottom: "16px" }}>
                             <p style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>
-                                ✅ Brand Kit Extracted
+                                ✅ Brand Kit Extracted & Generated
                             </p>
+                            {brandKit.brandName && (
+                                <p style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "4px" }}>
+                                    {brandKit.brandName} {brandKit.brandYear || ''}
+                                </p>
+                            )}
                             {uploadedFileName && (
                                 <p style={{ fontSize: "12px", color: "#666" }}>
                                     From: {uploadedFileName}
+                                </p>
+                            )}
+                            {brandKit.designLanguage && (
+                                <p style={{ fontSize: "11px", color: "#666", marginTop: "8px", fontStyle: "italic" }}>
+                                    {brandKit.designLanguage}
                                 </p>
                             )}
                         </div>
@@ -791,8 +880,55 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             </div>
                         )}
 
-                        {/* Icons & Graphics Preview */}
-                        {brandKit.graphics && (
+                        {/* Extracted Graphics & Icons Preview */}
+                        {brandKit.graphics?.extractedGraphics && brandKit.graphics.extractedGraphics.length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎨 Extracted Graphics & Icons:
+                                </p>
+                                <p style={{ fontSize: "10px", color: "#666", marginBottom: "8px" }}>
+                                    Graphics extracted from uploaded design for easy reference
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+                                    {brandKit.graphics.extractedGraphics.map((graphic, i) => (
+                                        <div key={i} style={{ 
+                                            padding: "8px", 
+                                            backgroundColor: "#f9f9f9", 
+                                            borderRadius: "4px",
+                                            border: "1px solid #ddd",
+                                            maxWidth: "200px"
+                                        }}>
+                                            <img 
+                                                src={`data:image/png;base64,${graphic.imageBase64}`}
+                                                alt={graphic.name}
+                                                style={{ 
+                                                    width: "100%", 
+                                                    height: "auto",
+                                                    borderRadius: "4px",
+                                                    marginBottom: "4px",
+                                                    backgroundColor: "white",
+                                                    padding: "4px"
+                                                }}
+                                            />
+                                            <p style={{ fontSize: "10px", fontWeight: "bold", margin: "4px 0 2px 0" }}>
+                                                {graphic.name}
+                                            </p>
+                                            <p style={{ fontSize: "9px", color: "#666", margin: 0 }}>
+                                                {graphic.type}
+                                            </p>
+                                            {graphic.description && (
+                                                <p style={{ fontSize: "9px", color: "#666", marginTop: "2px" }}>
+                                                    {graphic.description}
+                                                </p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Icons & Graphics Preview (descriptions) */}
+                        {brandKit.graphics && (!brandKit.graphics.extractedGraphics || brandKit.graphics.extractedGraphics.length === 0) && (
                             <div style={{ marginBottom: "16px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
                                     Icons & Graphics:
@@ -862,6 +998,208 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             </div>
                         )}
 
+                        {/* Generated Assets - Logos */}
+                        {brandKit.generatedAssets && brandKit.generatedAssets.filter(a => a.type === 'logo').length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎨 Generated Logos:
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {brandKit.generatedAssets
+                                        .filter(a => a.type === 'logo')
+                                        .map((asset, i) => (
+                                            <div key={i} style={{ 
+                                                padding: "8px", 
+                                                backgroundColor: "#f9f9f9", 
+                                                borderRadius: "4px",
+                                                border: "1px solid #ddd",
+                                                maxWidth: "200px"
+                                            }}>
+                                                <img 
+                                                    src={`data:image/png;base64,${asset.base64}`}
+                                                    alt={asset.description}
+                                                    style={{ 
+                                                        width: "100%", 
+                                                        height: "auto",
+                                                        borderRadius: "4px",
+                                                        marginBottom: "4px"
+                                                    }}
+                                                />
+                                                <p style={{ fontSize: "10px", color: "#666", margin: 0 }}>
+                                                    {asset.variant}
+                                                </p>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Generated Assets - Characters */}
+                        {brandKit.generatedAssets && brandKit.generatedAssets.filter(asset => asset.type === 'illustration' && brandKit.characters?.some(c => c.name.toLowerCase().replace(/\s+/g, '-') === asset.variant)).length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎭 Generated Characters:
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {brandKit.generatedAssets
+                                        .filter(asset => asset.type === 'illustration' && brandKit.characters?.some(c => c.name.toLowerCase().replace(/\s+/g, '-') === asset.variant))
+                                        .map((asset, i) => {
+                                            const character = brandKit.characters?.find(c => c.name.toLowerCase().replace(/\s+/g, '-') === asset.variant);
+                                            return (
+                                                <div key={i} style={{ 
+                                                    padding: "8px", 
+                                                    backgroundColor: "#f9f9f9", 
+                                                    borderRadius: "4px",
+                                                    border: "1px solid #ddd",
+                                                    maxWidth: "200px"
+                                                }}>
+                                                    <img 
+                                                        src={`data:image/png;base64,${asset.base64}`}
+                                                        alt={asset.description}
+                                                        style={{ 
+                                                            width: "100%", 
+                                                            height: "auto",
+                                                            borderRadius: "4px",
+                                                            marginBottom: "4px"
+                                                        }}
+                                                    />
+                                                    <p style={{ fontSize: "10px", fontWeight: "bold", margin: "0 0 2px 0" }}>
+                                                        {character?.name || asset.variant}
+                                                    </p>
+                                                    {character?.element && (
+                                                        <p style={{ fontSize: "9px", color: "#666", margin: 0 }}>
+                                                            {character.element}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Generated Assets - Patterns */}
+                        {brandKit.generatedAssets && brandKit.generatedAssets.filter(a => a.type === 'pattern').length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎨 Generated Patterns:
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {brandKit.generatedAssets
+                                        .filter(a => a.type === 'pattern')
+                                        .map((asset, i) => (
+                                            <div key={i} style={{ 
+                                                padding: "8px", 
+                                                backgroundColor: "#f9f9f9", 
+                                                borderRadius: "4px",
+                                                border: "1px solid #ddd",
+                                                maxWidth: "200px"
+                                            }}>
+                                                <img 
+                                                    src={`data:image/png;base64,${asset.base64}`}
+                                                    alt={asset.description}
+                                                    style={{ 
+                                                        width: "100%", 
+                                                        height: "auto",
+                                                        borderRadius: "4px",
+                                                        marginBottom: "4px"
+                                                    }}
+                                                />
+                                                <p style={{ fontSize: "10px", color: "#666", margin: 0 }}>
+                                                    {asset.description}
+                                                </p>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Generated Assets - Imagery */}
+                        {brandKit.generatedAssets && brandKit.generatedAssets.filter(asset => asset.type === 'illustration' && !brandKit.characters?.some(c => c.name.toLowerCase().replace(/\s+/g, '-') === asset.variant)).length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🖼️ Generated Imagery:
+                                </p>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {brandKit.generatedAssets
+                                        .filter(asset => asset.type === 'illustration' && !brandKit.characters?.some(c => c.name.toLowerCase().replace(/\s+/g, '-') === asset.variant))
+                                        .map((asset, i) => (
+                                            <div key={i} style={{ 
+                                                padding: "8px", 
+                                                backgroundColor: "#f9f9f9", 
+                                                borderRadius: "4px",
+                                                border: "1px solid #ddd",
+                                                maxWidth: "200px"
+                                            }}>
+                                                <img 
+                                                    src={`data:image/png;base64,${asset.base64}`}
+                                                    alt={asset.description}
+                                                    style={{ 
+                                                        width: "100%", 
+                                                        height: "auto",
+                                                        borderRadius: "4px",
+                                                        marginBottom: "4px"
+                                                    }}
+                                                />
+                                                <p style={{ fontSize: "10px", color: "#666", margin: 0 }}>
+                                                    {asset.description}
+                                                </p>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Characters (if not generated yet) */}
+                        {brandKit.characters && brandKit.characters.length > 0 && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🎭 Characters:
+                                </p>
+                                {brandKit.characters.map((char, i) => (
+                                    <div key={i} style={{ fontSize: "11px", marginBottom: "6px", padding: "6px", backgroundColor: "#f5f5f5", borderRadius: "4px" }}>
+                                        <div style={{ fontWeight: "bold" }}>{char.name}</div>
+                                        <div style={{ fontSize: "10px", color: "#666" }}>
+                                            {char.type} {char.element ? `• ${char.element}` : ''}
+                                        </div>
+                                        <div style={{ fontSize: "10px", marginTop: "4px" }}>{char.description}</div>
+                                        {char.usage && (
+                                            <div style={{ fontSize: "9px", color: "#999", marginTop: "2px" }}>Usage: {char.usage}</div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Imagery Guidelines */}
+                        {brandKit.imagery && (
+                            <div style={{ marginBottom: "16px" }}>
+                                <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
+                                    🖼️ Imagery Guidelines:
+                                </p>
+                                {brandKit.imagery.style && (
+                                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                                        <strong>Style:</strong> {brandKit.imagery.style}
+                                    </div>
+                                )}
+                                {brandKit.imagery.themes && brandKit.imagery.themes.length > 0 && (
+                                    <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                                        <strong>Themes:</strong> {brandKit.imagery.themes.join(", ")}
+                                    </div>
+                                )}
+                                {brandKit.imagery.guidelines && brandKit.imagery.guidelines.length > 0 && (
+                                    <div style={{ fontSize: "11px" }}>
+                                        <strong>Guidelines:</strong>
+                                        <ul style={{ margin: "4px 0", paddingLeft: "20px" }}>
+                                            {brandKit.imagery.guidelines.map((guideline, i) => (
+                                                <li key={i} style={{ fontSize: "10px" }}>{guideline}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Communication Style (Advanced/Collapsible) */}
                         {brandKit.communicationStyle && (
                             <div style={{ marginBottom: "16px" }}>
@@ -914,8 +1252,8 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                             </div>
                         )}
 
-                        {/* Multi-Platform Converter Section */}
-                        <div style={{ 
+                        {/* Multi-Platform Converter Section - COMMENTED OUT */}
+                        {false && <div style={{ 
                             marginTop: "24px", 
                             padding: "16px", 
                             backgroundColor: "#f5f5f5", 
@@ -929,7 +1267,6 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                 Upload a raw design to apply brand kit styling and create platform-optimized versions.
                             </p>
 
-                            {/* Platform Selection */}
                             <div style={{ marginBottom: "12px" }}>
                                 <p style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "8px" }}>
                                     Select Platforms:
@@ -1183,6 +1520,7 @@ const App = ({ addOnUISdk, sandboxProxy }: { addOnUISdk: AddOnSDKAPI; sandboxPro
                                 </p>
                             )}
                         </div>
+                        }
 
                         {/* PDF Selection Options */}
                         <div style={{
